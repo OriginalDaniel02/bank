@@ -4,6 +4,6 @@ import danbank.common.exception.NotFoundException;
 
 public class AddressNotFoundException extends NotFoundException {
     public AddressNotFoundException() {
-        super("Address Not Found");
+        super("No address on file for this user");
     }
 }

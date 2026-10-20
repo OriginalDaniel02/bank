@@ -1,7 +1,12 @@
 package danbank.user.service;
 
-import danbank.address.services.AddressServices;
-import danbank.user.dto.*;
+import danbank.address.services.AddressService;
+import danbank.security.AuthUser;
+import danbank.user.dto.ChangePassword;
+import danbank.user.dto.UserRequest;
+import danbank.user.dto.UserResponse;
+import danbank.user.dto.UserUpdateRequest;
+import danbank.user.exception.EmailNotFoundException;
 import danbank.user.exception.InvalidCredentialsException;
 import danbank.user.exception.UserDuplicateException;
 import danbank.user.exception.UserNotFoundException;
@@ -15,22 +20,21 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
-import static danbank.user.model.User.LastFourDigits;
+import static danbank.user.model.User.lastFourDigits;
+import static danbank.user.model.User.normalizePhoneNumber;
 
 @Service
 public class UserService implements UserDetailsService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
-    private final AddressServices addressServices;
-
+    private final AddressService addressServices;
     private final BvnHash encryptBvn;
 
-    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder, AddressServices addressServices, BvnHash encryptBvn) {
+    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder, AddressService addressServices, BvnHash encryptBvn) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.addressServices = addressServices;
@@ -40,52 +44,45 @@ public class UserService implements UserDetailsService {
     @Transactional
     public UserResponse signUp(UserRequest request) {
         String email = request.email().strip().toLowerCase(Locale.ROOT);
-        if (userRepository.existsByPhoneNumber(request.phoneNumber())
-                || userRepository.existsByEmail(email)) {
+        String normalizedPhone = normalizePhoneNumber(request.phoneNumber());
+        String bvnHash = encryptBvn.hash(request.bvn());
+
+        if (userRepository.existsByPhoneNumber(normalizedPhone)
+                || userRepository.existsByEmail(email)
+                || userRepository.existsByBvnHash(bvnHash)) {
             throw new UserDuplicateException();
         }
 
         User user = User.builder()
                 .firstName(request.firstName())
                 .lastName(request.lastName())
-                .email(request.email())
+                .email(email)
                 .phoneNumber(request.phoneNumber())
-                .bvnLast4(LastFourDigits(request.bvn()))
-                .bvnHash(encryptBvn.hash(request.bvn()))
+                .bvnLast4(lastFourDigits(request.bvn()))
+                .bvnHash(bvnHash)
                 .dateOfBirth(request.dateOfBirth())
                 .passwordHash(passwordEncoder.encode(request.password()))
                 .build();
 
-        User saved  = userRepository.save(user);
+        User saved = userRepository.save(user);
         addressServices.createAddress(saved.getId(), request.address());
 
         return UserResponse.from(saved);
     }
 
-    public UserResponse loginUser(LoginRequest request) {
-        String email =  request.email().strip().toLowerCase(Locale.ROOT);
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(InvalidCredentialsException::new);
-
-        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
-            throw new InvalidCredentialsException();
-        }
-        return UserResponse.from(user);
-    }
-
     public UserResponse getUserById(long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(UserNotFoundException::new);
-        return UserResponse.from(user) ;
+        return UserResponse.from(user);
     }
 
     public List<UserResponse> getAllUsers() {
         return userRepository.findAll().stream().map(UserResponse::from).toList();
     }
 
-    public UserResponse getUserByEMail(String email) {
-        String mail =  email.strip().toLowerCase(Locale.ROOT);
-        User user = userRepository.findByEmail(mail).orElseThrow(UserNotFoundException::new);
+    public UserResponse getUserByEmail(String email) {
+        String normalizedEmail = email.strip().toLowerCase(Locale.ROOT);
+        User user = userRepository.findByEmail(normalizedEmail).orElseThrow(EmailNotFoundException::new);
         return UserResponse.from(user);
     }
 
@@ -96,53 +93,45 @@ public class UserService implements UserDetailsService {
     }
 
     @Transactional
-    public UserResponse updateUser(Long userId, UserUpdateRequest request) {
+    public UserResponse updateUser(long userId, UserUpdateRequest request) {
         User user = userRepository.findById(userId).orElseThrow(UserNotFoundException::new);
-        if(request.firstName() != null || request.lastName() !=null){
+        if (request.firstName() != null || request.lastName() != null) {
             user.changeNames(
                     request.firstName() != null ? request.firstName() : user.getFirstName(),
-                    request.lastName() != null ?  request.lastName() : user.getLastName());
+                    request.lastName() != null ? request.lastName() : user.getLastName());
         }
 
-        if(request.email() != null && !request.email().equals(user.getEmail())){
-            if(userRepository.existsByEmail(request.email())){
+        if (request.email() != null && !request.email().equals(user.getEmail())) {
+            if (userRepository.existsByEmail(request.email())) {
                 throw new UserDuplicateException();
             }
             user.changeEmail(request.email());
         }
-        if(request.phoneNumber() != null && !request.phoneNumber().equals(user.getPhoneNumber())){
-            if(userRepository.existsByPhoneNumber(request.phoneNumber())){
-                throw  new UserDuplicateException();
+        if (request.phoneNumber() != null) {
+            String normalizedPhone = normalizePhoneNumber(request.phoneNumber());
+            if (!normalizedPhone.equals(user.getPhoneNumber())) {
+                if (userRepository.existsByPhoneNumber(normalizedPhone)) {
+                    throw new UserDuplicateException();
+                }
+                user.changePhoneNumber(request.phoneNumber());
             }
-            user.changePhoneNumber(request.phoneNumber());
         }
         return UserResponse.from(user);
     }
 
     @Transactional
-    public void changePassword(Long userId, ChangePassword changePwd){
+    public void changePassword(long userId, ChangePassword changePwd) {
         User user = userRepository.findById(userId).orElseThrow(UserNotFoundException::new);
-        if(!passwordEncoder.matches(changePwd.currentPassword(),user.getPasswordHash())){
+        if (!passwordEncoder.matches(changePwd.currentPassword(), user.getPasswordHash())) {
             throw new InvalidCredentialsException();
-
         }
-        user.changePassword(passwordEncoder.encode(changePwd.changePassword()));
+        user.changePassword(passwordEncoder.encode(changePwd.newPassword()));
     }
-
-
-
-
-
 
     @Override
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
-        return org.springframework.security.core.userdetails.User.builder()
-                .username(user.getEmail())
-                .password(user.getPasswordHash())
-                .authorities(Collections.emptyList())
-                .build();
+        return new AuthUser(user);
     }
-
 }

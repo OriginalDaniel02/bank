@@ -7,7 +7,7 @@ import jakarta.validation.constraints.Size;
 public record AddressRequest(
 
         @NotBlank(message = "State is required")
-        @Size(max = 25, message = "State must be at most 50 characters ")
+        @Size(max = 25, message = "State must be at most 25 characters")
         String state,
 
         @NotBlank(message = "LGA is required")
@@ -18,7 +18,7 @@ public record AddressRequest(
         String postalCode,
 
         @NotBlank(message = "Landmark is required")
-        @Size(max = 60, message = "Landmark should not be more thn 120 characters")
+        @Size(max = 120, message = "Landmark must be at most 120 characters")
         String landmark,
 
         @NotBlank(message = "Address is required")
@@ -40,9 +40,9 @@ public record AddressRequest(
 
     }
 
-    private String cleanText(String s){
-        if(s == null) return null;
+    private String cleanText(String s) {
+        if (s == null) return null;
         String t = s.strip().toLowerCase();
-        return s.isEmpty() ? null : t;
+        return t.isEmpty() ? null : t;
     }
 }

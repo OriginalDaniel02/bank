@@ -4,6 +4,7 @@ import danbank.auth.dto.AuthResponse;
 import danbank.auth.model.RefreshToken;
 import danbank.auth.repository.RefreshTokenRepository;
 import danbank.user.dto.LoginRequest;
+import danbank.user.exception.InvalidCredentialsException;
 import danbank.user.model.User;
 import danbank.user.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,6 +17,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
@@ -28,24 +30,42 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final TokenService tokenService;
     private final long refreshTokenDays;
+    private final int maxFailedLoginAttempts;
+    private final Duration lockoutDuration;
 
     public AuthService(
             UserRepository userRepository, RefreshTokenRepository refreshTokenRepository,
-                       PasswordEncoder passwordEncoder, TokenService tokenService,
-                       @Value("${jwt.refresh-token-days}") long refreshTokenDays) {
+            PasswordEncoder passwordEncoder, TokenService tokenService,
+            @Value("${jwt.refresh-token-days}") long refreshTokenDays,
+            @Value("${bank.login.max-failed-attempts}") int maxFailedLoginAttempts,
+            @Value("${bank.login.lockout-minutes}") long lockoutMinutes) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.tokenService = tokenService;
         this.refreshTokenDays = refreshTokenDays;
+        this.maxFailedLoginAttempts = maxFailedLoginAttempts;
+        this.lockoutDuration = Duration.ofMinutes(lockoutMinutes);
     }
 
     @Transactional
     public AuthResponse login(LoginRequest request) {
-        User user = userRepository.findByEmail(request.email()).orElseThrow(this::invalidCredentials);
-        if (!passwordEncoder.matches(request.password(), user.getPassword())) {
+        User user = userRepository.findByEmail(request.email().strip().toLowerCase())
+                .orElseThrow(this::invalidCredentials);
+
+        if (user.isLocked()) {
+            throw new ResponseStatusException(
+                    HttpStatus.LOCKED,
+                    "Too many failed login attempts. Try again after " + user.getLockedUntil()
+            );
+        }
+
+        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            user.recordFailedLogin(maxFailedLoginAttempts, lockoutDuration);
             throw invalidCredentials();
         }
+
+        user.recordSuccessfulLogin();
         return createTokenPair(user);
     }
 
@@ -87,7 +107,7 @@ public class AuthService {
         }
     }
 
-    private ResponseStatusException invalidCredentials() {
-        return new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid email or password");
+    private InvalidCredentialsException invalidCredentials() {
+        return new InvalidCredentialsException();
     }
 }
