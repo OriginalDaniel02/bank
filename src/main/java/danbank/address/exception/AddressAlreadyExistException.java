@@ -1,9 +1,9 @@
 package danbank.address.exception;
 
-import danbank.common.exception.NotFoundException;
+import danbank.common.exception.ConflictException;
 
-public class AddressAlreadyExistException extends NotFoundException {
+public class AddressAlreadyExistException extends ConflictException {
     public AddressAlreadyExistException() {
-        super("Address already Exist");
+        super("This user already has an active address on file");
     }
 }

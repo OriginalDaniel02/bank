@@ -1,14 +1,16 @@
 package danbank;
 
-import danbank.account.dtos.AccountResponse;
 import danbank.account.dtos.PageResponse;
 import danbank.account.dtos.TransactionDto;
+import danbank.account.exception.AccountNotFoundException;
 import danbank.account.model.Account;
 import danbank.account.model.AccountTransaction;
 import danbank.account.model.TransactionType;
 import danbank.account.repository.AccountRepo;
 import danbank.account.repository.AccountTransactionRepository;
 import danbank.account.service.AccountServ;
+import danbank.common.dto.ApiResponse;
+import danbank.user.model.User;
 import danbank.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,10 +21,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
-import org.springframework.web.server.ResponseStatusException;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
-import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -38,6 +40,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class AccountTransactionHistoryTest {
 
+    private static final BigDecimal DAILY_DEBIT_LIMIT = new BigDecimal("1000000.00");
+
     @Mock
     private AccountRepo accountRepository;
 
@@ -51,28 +55,23 @@ class AccountTransactionHistoryTest {
 
     @BeforeEach
     void setUp() {
-        accountService = new AccountServ(accountRepository, transactionRepository, userRepository);
+        accountService = new AccountServ(accountRepository, transactionRepository, userRepository, DAILY_DEBIT_LIMIT);
     }
 
     @Test
     void returnsPagedTransactionsForExistingAccount() {
-        Account account = new Account();
-        account.setId(1L);
+        Account account = testAccount();
         when(accountRepository.findById(1L)).thenReturn(Optional.of(account));
 
-        AccountTransaction transaction = new AccountTransaction();
-        transaction.setAccount(account);
-        transaction.setType(TransactionType.CREDIT);
-        transaction.setAmount(new BigDecimal("50.00"));
-        transaction.setReference("ref-1");
-        transaction.setDescription("Initial deposit");
-        transaction.setCreatedAt(Instant.now());
+        AccountTransaction transaction = new AccountTransaction(
+                account, TransactionType.CREDIT, new BigDecimal("50.00"), "ref-1", "Initial deposit"
+        );
 
         Page<AccountTransaction> page = new PageImpl<>(List.of(transaction));
         when(transactionRepository.findByAccount_IdOrderByCreatedAtDesc(eq(1L), any(Pageable.class)))
                 .thenReturn(page);
 
-        AccountResponse<PageResponse<TransactionDto>> response = accountService.getTransactionHistory(1L, 0, 20);
+        ApiResponse<PageResponse<TransactionDto>> response = accountService.getTransactionHistory(1L, 0, 20);
 
         assertEquals("Transactions found", response.message());
         assertEquals(1, response.data().content().size());
@@ -86,14 +85,13 @@ class AccountTransactionHistoryTest {
     void throwsNotFoundWhenAccountDoesNotExist() {
         when(accountRepository.findById(99L)).thenReturn(Optional.empty());
 
-        assertThrows(ResponseStatusException.class, () -> accountService.getTransactionHistory(99, 0, 20));
+        assertThrows(AccountNotFoundException.class, () -> accountService.getTransactionHistory(99, 0, 20));
         verify(transactionRepository, never()).findByAccount_IdOrderByCreatedAtDesc(anyLong(), any());
     }
 
     @Test
     void clampsPageAndSizeToSafeBounds() {
-        Account account = new Account();
-        account.setId(1L);
+        Account account = testAccount();
         when(accountRepository.findById(1L)).thenReturn(Optional.of(account));
         when(transactionRepository.findByAccount_IdOrderByCreatedAtDesc(eq(1L), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of()));
@@ -105,5 +103,26 @@ class AccountTransactionHistoryTest {
 
         assertEquals(0, pageableCaptor.getValue().getPageNumber());
         assertEquals(100, pageableCaptor.getValue().getPageSize());
+    }
+
+    private Account testAccount() {
+        User user = User.builder()
+                .firstName("Test")
+                .lastName("User")
+                .email("test.user@example.com")
+                .phoneNumber("08011111111")
+                .bvnHash("test-bvn-hash")
+                .bvnLast4("1234")
+                .dateOfBirth(LocalDate.of(2000, 1, 1))
+                .passwordHash("not-used-by-this-test")
+                .build();
+
+        Account account = Account.builder()
+                .user(user)
+                .accountName("Test User")
+                .accountNumber("8011111111")
+                .build();
+        ReflectionTestUtils.setField(account, "id", 1L);
+        return account;
     }
 }

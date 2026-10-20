@@ -6,6 +6,7 @@ import danbank.account.dtos.TransferRequest;
 import danbank.account.repository.AccountRepo;
 import danbank.account.repository.AccountTransactionRepository;
 import danbank.account.service.AccountServ;
+import danbank.address.repository.AddressRepository;
 import danbank.auth.repository.RefreshTokenRepository;
 import danbank.user.model.User;
 import danbank.user.repository.UserRepository;
@@ -24,6 +25,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -33,6 +35,7 @@ class AccountConcurrencyIntegrationTests {
 
     private static final int NUMBER_OF_REQUESTS = 20;
     private static final BigDecimal REQUEST_AMOUNT = new BigDecimal("5.00");
+    private static final AtomicInteger PHONE_SEQUENCE = new AtomicInteger(1);
 
     @Autowired
     private AccountServ accountService;
@@ -47,6 +50,9 @@ class AccountConcurrencyIntegrationTests {
     private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
+    private AddressRepository addressRepository;
+
+    @Autowired
     private UserRepository userRepository;
 
     @BeforeEach
@@ -55,6 +61,7 @@ class AccountConcurrencyIntegrationTests {
         transactionRepository.deleteAll();
         refreshTokenRepository.deleteAll();
         accountRepository.deleteAll();
+        addressRepository.deleteAll();
         userRepository.deleteAll();
     }
 
@@ -105,15 +112,20 @@ class AccountConcurrencyIntegrationTests {
                 .firstName("Test")
                 .lastName("User")
                 .email(uniqueValue + "@example.com")
-                .phoneNumber("080" + Math.abs(uniqueValue.hashCode()))
-                .address("Test address")
+                .phoneNumber(nextPhoneNumber())
+                .bvnHash(uniqueValue)
+                .bvnLast4("1234")
                 .dateOfBirth(LocalDate.of(2000, 1, 1))
-                .password("not-used-by-this-test")
+                .passwordHash("not-used-by-this-test")
                 .build();
 
         User savedUser = userRepository.save(user);
         AccountDto account = accountService.createAccount(savedUser.getId()).data();
         return account.id();
+    }
+
+    private String nextPhoneNumber() {
+        return String.format("0801%07d", PHONE_SEQUENCE.getAndIncrement());
     }
 
     private void runConcurrently(int numberOfRequests, ThrowingRunnable work) throws Exception {

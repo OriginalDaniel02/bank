@@ -1,16 +1,19 @@
 package danbank.account.controller;
 
 import danbank.account.dtos.AccountDto;
-import danbank.account.dtos.AccountResponse;
 import danbank.account.dtos.AccountUpdate;
 import danbank.account.dtos.MoneyRequest;
 import danbank.account.dtos.PageResponse;
 import danbank.account.dtos.TransactionDto;
 import danbank.account.dtos.TransferRequest;
 import danbank.account.service.AccountServ;
+import danbank.common.dto.ApiResponse;
+import danbank.security.AuthUser;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -34,23 +37,31 @@ public class AccountController {
     }
 
     @GetMapping
-    public ResponseEntity<AccountResponse<List<AccountDto>>> getAllAccounts() {
+    public ResponseEntity<ApiResponse<List<AccountDto>>> getMyAccounts(@AuthenticationPrincipal AuthUser caller) {
+        return ResponseEntity.ok(accountService.getAccountsForUser(caller.getId()));
+    }
+
+    @GetMapping("/all")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<List<AccountDto>>> getAllAccounts() {
         return ResponseEntity.ok(accountService.getAllUserAccount());
     }
 
     @GetMapping("/{accountId}")
-    public ResponseEntity<AccountResponse<AccountDto>> getAccount(@PathVariable long accountId) {
+    @PreAuthorize("@accessPolicy.ownsAccount(authentication, #accountId)")
+    public ResponseEntity<ApiResponse<AccountDto>> getAccount(@PathVariable long accountId) {
         return ResponseEntity.ok(accountService.getAccount(accountId));
     }
 
-    @PostMapping("/user/{userId}")
-    public ResponseEntity<AccountResponse<AccountDto>> createAccount(@PathVariable long userId) {
+    @PostMapping
+    public ResponseEntity<ApiResponse<AccountDto>> createAccount(@AuthenticationPrincipal AuthUser caller) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(accountService.createAccount(userId));
+                .body(accountService.createAccount(caller.getId()));
     }
 
     @PostMapping("/{accountId}/credit")
-    public ResponseEntity<AccountResponse<TransactionDto>> creditAccount(
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<TransactionDto>> creditAccount(
             @PathVariable long accountId,
             @Valid @RequestBody MoneyRequest request
     ) {
@@ -59,7 +70,8 @@ public class AccountController {
     }
 
     @PostMapping("/{accountId}/debit")
-    public ResponseEntity<AccountResponse<TransactionDto>> debitAccount(
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<TransactionDto>> debitAccount(
             @PathVariable long accountId,
             @Valid @RequestBody MoneyRequest request
     ) {
@@ -68,7 +80,8 @@ public class AccountController {
     }
 
     @GetMapping("/{accountId}/transactions")
-    public ResponseEntity<AccountResponse<PageResponse<TransactionDto>>> getTransactionHistory(
+    @PreAuthorize("@accessPolicy.ownsAccount(authentication, #accountId)")
+    public ResponseEntity<ApiResponse<PageResponse<TransactionDto>>> getTransactionHistory(
             @PathVariable long accountId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
@@ -77,35 +90,36 @@ public class AccountController {
     }
 
     @PostMapping("/transfer")
-    public ResponseEntity<AccountResponse<List<TransactionDto>>> transfer(
+    @PreAuthorize("@accessPolicy.ownsAccount(authentication, #request.fromAccountId())")
+    public ResponseEntity<ApiResponse<List<TransactionDto>>> transfer(
             @Valid @RequestBody TransferRequest request
     ) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(accountService.transfer(request));
     }
 
-    @PutMapping("/{accountId}/user/{userId}")
-    public ResponseEntity<AccountResponse<AccountDto>> updateAccount(
+    @PutMapping("/{accountId}")
+    public ResponseEntity<ApiResponse<AccountDto>> updateAccount(
             @PathVariable long accountId,
-            @PathVariable long userId,
+            @AuthenticationPrincipal AuthUser caller,
             @Valid @RequestBody AccountUpdate request
     ) {
-        return ResponseEntity.ok(accountService.updateAccount(accountId, userId, request));
+        return ResponseEntity.ok(accountService.updateAccount(accountId, caller.getId(), request));
     }
 
-    @PostMapping("/{accountId}/user/{userId}/deactivate")
-    public ResponseEntity<AccountResponse<AccountDto>> deactivateAccount(
+    @PostMapping("/{accountId}/deactivate")
+    public ResponseEntity<ApiResponse<AccountDto>> deactivateAccount(
             @PathVariable long accountId,
-            @PathVariable long userId
+            @AuthenticationPrincipal AuthUser caller
     ) {
-        return ResponseEntity.ok(accountService.deActivateAccount(userId, accountId));
+        return ResponseEntity.ok(accountService.deActivateAccount(caller.getId(), accountId));
     }
 
-    @DeleteMapping("/{accountId}/user/{userId}")
-    public ResponseEntity<AccountResponse<AccountDto>> deleteAccount(
+    @DeleteMapping("/{accountId}")
+    public ResponseEntity<ApiResponse<AccountDto>> deleteAccount(
             @PathVariable long accountId,
-            @PathVariable long userId
+            @AuthenticationPrincipal AuthUser caller
     ) {
-        return ResponseEntity.ok(accountService.deleteAccount(userId, accountId));
+        return ResponseEntity.ok(accountService.deleteAccount(caller.getId(), accountId));
     }
 }

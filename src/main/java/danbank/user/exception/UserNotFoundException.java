@@ -4,6 +4,6 @@ import danbank.common.exception.NotFoundException;
 
 public class UserNotFoundException extends NotFoundException {
     public UserNotFoundException() {
-        super("User Not Found");
+        super("User not found");
     }
 }

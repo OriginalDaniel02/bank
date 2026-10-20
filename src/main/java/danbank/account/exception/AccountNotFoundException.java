@@ -4,6 +4,6 @@ import danbank.common.exception.NotFoundException;
 
 public class AccountNotFoundException extends NotFoundException {
     public AccountNotFoundException() {
-        super("Account does not exists");
+        super("Account does not exist");
     }
 }

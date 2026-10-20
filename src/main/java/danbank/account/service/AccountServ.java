@@ -1,7 +1,6 @@
 package danbank.account.service;
 
 import danbank.account.dtos.AccountDto;
-import danbank.account.dtos.AccountResponse;
 import danbank.account.dtos.AccountUpdate;
 import danbank.account.dtos.MoneyRequest;
 import danbank.account.dtos.PageResponse;
@@ -12,14 +11,14 @@ import danbank.account.exception.AccountOwnerNotFoundException;
 import danbank.account.model.Account;
 import danbank.account.model.AccountStatus;
 import danbank.account.model.AccountTransaction;
-import danbank.account.model.AccountType;
 import danbank.account.model.TransactionType;
 import danbank.account.repository.AccountRepo;
 import danbank.account.repository.AccountTransactionRepository;
-import danbank.user.exception.UserDuplicateException;
+import danbank.common.dto.ApiResponse;
 import danbank.user.exception.UserNotFoundException;
 import danbank.user.model.User;
 import danbank.user.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -30,59 +29,75 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.security.SecureRandom;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
 @Service
 public class AccountServ {
 
+    private static final int MAX_PAGE_SIZE = 100;
+    private static final int ACCOUNT_NUMBER_LENGTH = 10;
+    private static final int MAX_ACCOUNT_NUMBER_ATTEMPTS = 10;
+
     private final AccountRepo accountRepository;
     private final AccountTransactionRepository transactionRepository;
     private final UserRepository userRepository;
-    private static final int MAX_PAGE_SIZE = 100;
+    private final SecureRandom random = new SecureRandom();
+    private final BigDecimal dailyDebitLimit;
 
     public AccountServ(
             AccountRepo accountRepository,
             AccountTransactionRepository transactionRepository,
-            UserRepository userRepository
+            UserRepository userRepository,
+            @Value("${bank.limits.daily-debit-limit}") BigDecimal dailyDebitLimit
     ) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
         this.userRepository = userRepository;
+        this.dailyDebitLimit = dailyDebitLimit;
     }
 
     @Transactional
-    public AccountResponse createAccount(long userId) {
+    public ApiResponse<AccountDto> createAccount(long userId) {
         User user = userRepository.findById(userId)
-                .orElseThrow(UserDuplicateException::new);
+                .orElseThrow(UserNotFoundException::new);
 
-        Account account = new Account();
-        account.(user);
-        account.setAccountName((user.getFirstName() + " " + user.getLastName()).strip());
-        account.setAccountNumber(user.getPhoneNumber().strip().substring(2));
-        account.setBalance(BigDecimal.ZERO.setScale(2,RoundingMode.UNNECESSARY));
-        account.setType(AccountType.SAVINGS);
-        account.setStatus(AccountStatus.ACTIVE);
+        Account account = Account.builder()
+                .user(user)
+                .accountName((user.getFirstName() + " " + user.getLastName()).strip())
+                .accountNumber(generateUniqueAccountNumber())
+                .build();
 
         Account savedAccount = accountRepository.save(account);
-        return AccountResponse.from(savedAccount);
+        return ApiResponse.ok("Account created", toDto(savedAccount));
     }
 
     @Transactional(readOnly = true)
-    public List<AccountResponse> getAllUserAccount() {
-        return accountRepository.findAll().stream()
-                .map(AccountResponse::from)
+    public ApiResponse<List<AccountDto>> getAllUserAccount() {
+        List<AccountDto> accounts = accountRepository.findAll().stream()
+                .map(this::toDto)
                 .toList();
+        return ApiResponse.ok("Accounts found", accounts);
     }
 
     @Transactional(readOnly = true)
-    public AccountResponse getAccount(Long accountId) {
-        return AccountResponse.from(findAccount(accountId));
+    public ApiResponse<List<AccountDto>> getAccountsForUser(long userId) {
+        List<AccountDto> accounts = accountRepository.findByUser_Id(userId).stream()
+                .map(this::toDto)
+                .toList();
+        return ApiResponse.ok("Accounts found", accounts);
     }
 
+    @Transactional(readOnly = true)
+    public ApiResponse<AccountDto> getAccount(long accountId) {
+        return ApiResponse.ok("Account found", toDto(findAccount(accountId)));
+    }
 
     @Transactional(readOnly = true)
-    public AccountResponse<PageResponse<TransactionDto>> getTransactionHistory(long accountId, int page, int size) {
+    public ApiResponse<PageResponse<TransactionDto>> getTransactionHistory(long accountId, int page, int size) {
         findAccount(accountId);
 
         Pageable pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE));
@@ -95,36 +110,37 @@ public class AccountServ {
                 transactions.getTotalElements(),
                 transactions.getTotalPages()
         );
-        return new AccountResponse<>("Transactions found", pageResponse);
+        return ApiResponse.ok("Transactions found", pageResponse);
     }
 
     @Transactional
-    public AccountResponse<TransactionDto> credit(long accountId, MoneyRequest request) {
+    public ApiResponse<TransactionDto> credit(long accountId, MoneyRequest request) {
         Account account = findActiveAccountWithLock(accountId);
         BigDecimal amount = normalizeMoney(request.amount());
-        account.setBalance(account.getBalance().add(amount));
+        account.credit(amount);
 
         TransactionDto transaction = recordTransaction(
                 account, TransactionType.CREDIT, amount, request.description()
         );
-        return new AccountResponse<>("Account credited", transaction);
+        return ApiResponse.ok("Account credited", transaction);
     }
 
     @Transactional
-    public AccountResponse<TransactionDto> debit(long accountId, MoneyRequest request) {
+    public ApiResponse<TransactionDto> debit(long accountId, MoneyRequest request) {
         Account account = findActiveAccountWithLock(accountId);
         BigDecimal amount = normalizeMoney(request.amount());
         ensureSufficientFunds(account, amount);
-        account.setBalance(account.getBalance().subtract(amount));
+        ensureWithinDailyLimit(account, amount);
+        account.debit(amount);
 
         TransactionDto transaction = recordTransaction(
                 account, TransactionType.DEBIT, amount, request.description()
         );
-        return new AccountResponse<>("Account debited", transaction);
+        return ApiResponse.ok("Account debited", transaction);
     }
 
     @Transactional
-    public AccountResponse<List<TransactionDto>> transfer(TransferRequest request) {
+    public ApiResponse<List<TransactionDto>> transfer(TransferRequest request) {
         if (request.fromAccountId().equals(request.toAccountId())) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
@@ -143,40 +159,47 @@ public class AccountServ {
         BigDecimal amount = normalizeMoney(request.amount());
 
         ensureSufficientFunds(sourceAccount, amount);
-        sourceAccount.setBalance(sourceAccount.getBalance().subtract(amount));
-        destinationAccount.setBalance(destinationAccount.getBalance().add(amount));
+        ensureWithinDailyLimit(sourceAccount, amount);
+        sourceAccount.debit(amount);
+        destinationAccount.credit(amount);
 
-        String reference = UUID.randomUUID().toString();
+        String transferGroup = UUID.randomUUID().toString();
         List<TransactionDto> transactionEntries = List.of(
-                recordTransaction(sourceAccount, TransactionType.TRANSFER_OUT, amount, request.description(), reference),
-                recordTransaction(destinationAccount, TransactionType.TRANSFER_IN, amount, request.description(), reference)
+                recordTransaction(sourceAccount, TransactionType.TRANSFER_OUT, amount, request.description(), transferGroup),
+                recordTransaction(destinationAccount, TransactionType.TRANSFER_IN, amount, request.description(), transferGroup)
         );
-        return new AccountResponse<>("Transfer completed", transactionEntries);
+        return ApiResponse.ok("Transfer completed", transactionEntries);
     }
 
     @Transactional
-    public AccountResponse<AccountDto> deActivateAccount(Long userId, Long accountId) {
+    public ApiResponse<AccountDto> deActivateAccount(long userId, long accountId) {
         Account account = findOwnedAccount(userId, accountId);
-        account.setStatus(AccountStatus.NOT_ACTIVE);
-        return new AccountResponse<>("Account deactivated", toDto(account));
+        account.deactivate();
+        return ApiResponse.ok("Account deactivated", toDto(account));
     }
 
     @Transactional
-    public AccountResponse<AccountDto> deleteAccount(Long userId, Long accountId) {
+    public ApiResponse<AccountDto> deleteAccount(long userId, long accountId) {
         Account account = findOwnedAccount(userId, accountId);
         if (account.getBalance().signum() != 0) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Only zero-balance accounts can be deleted");
         }
         accountRepository.delete(account);
-        return new AccountResponse<>("Account deleted", null);
+        return ApiResponse.ok("Account deleted", toDto(account));
     }
 
     @Transactional
-    public AccountResponse updateAccount(Long accountId, Long userId, AccountUpdate update) {
+    public ApiResponse<AccountDto> updateAccount(long accountId, long userId, AccountUpdate update) {
         Account account = findOwnedAccount(userId, accountId);
-        if (update.type() != null) account.setType(update.type());
-        if (update.status() != null) account.setStatus(update.status());
-        return new AccountResponse<>("Account updated", toDto(account));
+        if (update.type() != null) {
+            account.changeType(update.type());
+        }
+        if (update.status() == AccountStatus.ACTIVE) {
+            account.activate();
+        } else if (update.status() == AccountStatus.NOT_ACTIVE) {
+            account.deactivate();
+        }
+        return ApiResponse.ok("Account updated", toDto(account));
     }
 
     private Account findActiveAccountWithLock(long accountId) {
@@ -203,32 +226,66 @@ public class AccountServ {
         }
     }
 
+    private void ensureWithinDailyLimit(Account account, BigDecimal amount) {
+        Instant startOfDay = Instant.now().truncatedTo(ChronoUnit.DAYS);
+        BigDecimal alreadySpentToday = transactionRepository.sumOutgoingSince(account.getId(), startOfDay);
+        if (alreadySpentToday.add(amount).compareTo(dailyDebitLimit) > 0) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "This transaction would exceed the daily debit limit of " + dailyDebitLimit
+            );
+        }
+    }
+
     private BigDecimal normalizeMoney(BigDecimal amount) {
         return amount.setScale(2, RoundingMode.UNNECESSARY);
     }
 
-    private TransactionDto recordTransaction(Account account, TransactionType type, BigDecimal amount, String description) {
-        return recordTransaction(account, type, amount, description, UUID.randomUUID().toString());
+    private String generateUniqueAccountNumber() {
+        for (int attempt = 0; attempt < MAX_ACCOUNT_NUMBER_ATTEMPTS; attempt++) {
+            String candidate = randomDigits(ACCOUNT_NUMBER_LENGTH);
+            if (!accountRepository.existsByAccountNumber(candidate)) {
+                return candidate;
+            }
+        }
+        throw new IllegalStateException("Could not generate a unique account number, please retry");
     }
 
-    private TransactionDto recordTransaction(Account account, TransactionType type, BigDecimal amount, String description, String reference) {
+    private String randomDigits(int length) {
+        StringBuilder digits = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            digits.append(random.nextInt(10));
+        }
+        return digits.toString();
+    }
+
+    private TransactionDto recordTransaction(Account account, TransactionType type, BigDecimal amount, String description) {
         AccountTransaction savedTransaction = transactionRepository.save(
-                new AccountTransaction(account, type, amount, reference, description)
+                new AccountTransaction(account, type, amount, UUID.randomUUID().toString(), description)
         );
-        return new TransactionDto(savedTransaction.getReference(), savedTransaction.getType().name(), account.getId(), savedTransaction.getAmount(), savedTransaction.getDescription(), savedTransaction.getCreatedAt());
+        return toDto(savedTransaction);
+    }
+
+    private TransactionDto recordTransaction(Account account, TransactionType type, BigDecimal amount, String description, String transferGroup) {
+        AccountTransaction savedTransaction = transactionRepository.save(
+                new AccountTransaction(account, type, amount, UUID.randomUUID().toString(), transferGroup, description)
+        );
+        return toDto(savedTransaction);
     }
 
     private AccountDto toDto(Account account) {
-        return new AccountDto(account.getId(), account.getUser().getId(), account.getAccountName(), account.getAccountNumber(), account.getBalance(), account.getType(), account.getStatus());
+        return AccountDto.from(account);
     }
 
     private TransactionDto toDto(AccountTransaction transaction) {
-        return new TransactionDto(transaction.getReference(), transaction.getType().name(), transaction.getAccount().getId(), transaction.getAmount(), transaction.getDescription(), transaction.getCreatedAt());
+        return new TransactionDto(
+                transaction.getReference(),
+                transaction.getTransferGroup(),
+                transaction.getType().name(),
+                transaction.getAccount().getId(),
+                transaction.getAmount(),
+                transaction.getDescription(),
+                transaction.getCreatedAt()
+        );
     }
-
-    private AccountResponse saveNew(){
-
-    }
-
-
 }

@@ -1,8 +1,8 @@
 package danbank.user.exception;
 
-import danbank.common.exception.NotFoundException;
+import danbank.common.exception.ConflictException;
 
-public class UserDuplicateException extends NotFoundException {
+public class UserDuplicateException extends ConflictException {
     public UserDuplicateException() {
         super("An account with these details already exists");
     }

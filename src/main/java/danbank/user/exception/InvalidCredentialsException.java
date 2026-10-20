@@ -1,9 +1,9 @@
 package danbank.user.exception;
 
-import danbank.common.exception.NotFoundException;
+import danbank.common.exception.UnauthorizedException;
 
-public class InvalidCredentialsException extends NotFoundException {
+public class InvalidCredentialsException extends UnauthorizedException {
     public InvalidCredentialsException() {
-        super("Invalid Credentials");
+        super("Invalid email or password");
     }
 }

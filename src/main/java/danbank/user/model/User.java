@@ -1,12 +1,21 @@
 package danbank.user.model;
 
-import danbank.address.model.Address;
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Arrays;
@@ -17,6 +26,8 @@ import java.util.Locale;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class User {
+
+    private static final String[] VALID_PHONE_PREFIXES = "070 071 080 081 090 091".split(" ");
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -29,7 +40,7 @@ public class User {
     private String lastName;
 
     @Column(nullable = false, unique = true, length = 15)
-    private String phoneNumber;                 // already in +234... form
+    private String phoneNumber;                 // stored normalized as "+234 ..."
 
     @Column(nullable = false, unique = true, length = 255)
     private String email;                       // lowercase
@@ -50,6 +61,17 @@ public class User {
     @Column(nullable = false, length = 20)
     private UserStatus status;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private Role role;
+
+    @Column(nullable = false)
+    private int failedLoginAttempts;
+
+    private Instant lockedUntil;
+
+    private Instant lastLoginAt;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -62,13 +84,14 @@ public class User {
                  LocalDate dateOfBirth) {
         this.firstName = firstName.strip();
         this.lastName = lastName.strip();
-        this.phoneNumber = phoneNumber;
+        this.phoneNumber = normalizePhoneNumber(phoneNumber);
         this.email = email.strip().toLowerCase(Locale.ROOT);
         this.passwordHash = passwordHash;
         this.bvnHash = bvnHash;
         this.bvnLast4 = bvnLast4;
         this.dateOfBirth = dateOfBirth;
         this.status = UserStatus.ACTIVE;
+        this.role = Role.USER;
     }
 
     @PrePersist
@@ -84,55 +107,73 @@ public class User {
     }
 
     public void close() {
-        if(status == UserStatus.CLOSED){
-            throw new IllegalArgumentException("User already closed");
+        if (status == UserStatus.CLOSED) {
+            throw new IllegalStateException("User is already closed");
         }
         this.status = UserStatus.CLOSED;
     }
 
-    public void changeNames(String firstName, String lastName){
+    public void changeNames(String firstName, String lastName) {
         requireActive();
         this.firstName = firstName.strip();
-        this.lastName =  lastName.strip();
-
+        this.lastName = lastName.strip();
     }
 
-    public void changeEmail(String email){
+    public void changeEmail(String email) {
         requireActive();
-        this.email =  email.strip().toLowerCase(Locale.ROOT);
+        this.email = email.strip().toLowerCase(Locale.ROOT);
     }
 
-    public void changePassword( String newPwdHash){
+    public void changePassword(String newPasswordHash) {
         requireActive();
-        this.passwordHash = newPwdHash;
-    }
-    public static String  LastFourDigits(String s){
-        return s.substring(s.length()-4);
+        this.passwordHash = newPasswordHash;
     }
 
-    public void changePhoneNumber(String newNumber){
+    public void changePhoneNumber(String newNumber) {
         requireActive();
-        this.phoneNumber = PhoneNumberNormalize(newNumber);
-
+        this.phoneNumber = normalizePhoneNumber(newNumber);
     }
 
-    public String PhoneNumberNormalize(String phone){
-        String num = phone.substring(0,2);
-        String[] validProviders =  "081 070 071 091 090 080 80 81 90 91 70 71".split(" ");
+    public boolean isLocked() {
+        return lockedUntil != null && lockedUntil.isAfter(Instant.now());
+    }
 
-        for(String provider : validProviders){
-            if(num.equals(provider.strip())){
-                return  "+234 "+phone.substring(1);
-            }
+    public void recordSuccessfulLogin() {
+        this.failedLoginAttempts = 0;
+        this.lockedUntil = null;
+        this.lastLoginAt = Instant.now();
+    }
+
+    public void recordFailedLogin(int maxAttempts, Duration lockoutDuration) {
+        this.failedLoginAttempts++;
+        if (this.failedLoginAttempts >= maxAttempts) {
+            this.lockedUntil = Instant.now().plus(lockoutDuration);
+        }
+    }
+
+    public static String lastFourDigits(String value) {
+        return value.substring(value.length() - 4);
+    }
+
+    public static String normalizePhoneNumber(String phone) {
+        String digitsOnly = phone.replaceAll("\\D", "");
+
+        // Accept a "234" country-code prefix and normalize it back to the local 0-leading form.
+        if (digitsOnly.length() == 13 && digitsOnly.startsWith("234")) {
+            digitsOnly = "0" + digitsOnly.substring(3);
         }
 
-        return null;
+        boolean hasValidPrefix = digitsOnly.length() == 11
+                && Arrays.stream(VALID_PHONE_PREFIXES).anyMatch(digitsOnly::startsWith);
+        if (!hasValidPrefix) {
+            throw new IllegalArgumentException("Phone number is not a recognised Nigerian mobile number");
+        }
+        return "+234 " + digitsOnly.substring(1);
     }
 
-
-    private void requireActive(){
-        if(status != UserStatus.ACTIVE){
-            throw  new IllegalArgumentException("User is required to be active");
+    private void requireActive() {
+        if (status != UserStatus.ACTIVE) {
+            throw new IllegalStateException("User must be active to perform this action");
         }
     }
 }
