@@ -3,6 +3,7 @@ package danbank.account.dtos;
 import danbank.account.model.Account;
 import danbank.account.model.AccountStatus;
 import danbank.account.model.AccountType;
+import danbank.account.model.Currency;
 
 import java.math.BigDecimal;
 
@@ -12,6 +13,7 @@ public record AccountDto(
         String accountName,
         String accountNumber,
         BigDecimal balance,
+        Currency currency,
         AccountType type,
         AccountStatus status
 ) {
@@ -23,6 +25,7 @@ public record AccountDto(
                 account.getAccountName(),
                 account.getAccountNumber(),
                 account.getBalance(),
+                account.getCurrency(),
                 account.getType(),
                 account.getStatus()
         );

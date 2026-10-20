@@ -3,8 +3,13 @@ package danbank.auth;
 import danbank.auth.dto.AuthResponse;
 import danbank.auth.model.RefreshToken;
 import danbank.auth.repository.RefreshTokenRepository;
+import danbank.common.audit.Audit;
+import danbank.notification.service.NotificationService;
+import danbank.security.TotpService;
 import danbank.user.dto.LoginRequest;
 import danbank.user.exception.InvalidCredentialsException;
+import danbank.user.exception.TwoFactorRequiredException;
+import danbank.user.exception.UserLockedException;
 import danbank.user.model.User;
 import danbank.user.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,6 +34,8 @@ public class AuthService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final TokenService tokenService;
+    private final TotpService totpService;
+    private final NotificationService notificationService;
     private final long refreshTokenDays;
     private final int maxFailedLoginAttempts;
     private final Duration lockoutDuration;
@@ -36,6 +43,7 @@ public class AuthService {
     public AuthService(
             UserRepository userRepository, RefreshTokenRepository refreshTokenRepository,
             PasswordEncoder passwordEncoder, TokenService tokenService,
+            TotpService totpService, NotificationService notificationService,
             @Value("${jwt.refresh-token-days}") long refreshTokenDays,
             @Value("${bank.login.max-failed-attempts}") int maxFailedLoginAttempts,
             @Value("${bank.login.lockout-minutes}") long lockoutMinutes) {
@@ -43,6 +51,8 @@ public class AuthService {
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.tokenService = tokenService;
+        this.totpService = totpService;
+        this.notificationService = notificationService;
         this.refreshTokenDays = refreshTokenDays;
         this.maxFailedLoginAttempts = maxFailedLoginAttempts;
         this.lockoutDuration = Duration.ofMinutes(lockoutMinutes);
@@ -50,22 +60,31 @@ public class AuthService {
 
     @Transactional
     public AuthResponse login(LoginRequest request) {
-        User user = userRepository.findByEmail(request.email().strip().toLowerCase())
-                .orElseThrow(this::invalidCredentials);
+        String email = request.email().strip().toLowerCase();
+        User user = userRepository.findByEmail(email).orElseThrow(this::invalidCredentials);
 
         if (user.isLocked()) {
-            throw new ResponseStatusException(
-                    HttpStatus.LOCKED,
-                    "Too many failed login attempts. Try again after " + user.getLockedUntil()
-            );
+            Audit.log("LOGIN_BLOCKED_LOCKED", "userId={}", user.getId());
+            throw new UserLockedException(user.getLockedUntil());
         }
 
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
-            user.recordFailedLogin(maxFailedLoginAttempts, lockoutDuration);
+            recordFailedLoginAndMaybeNotify(user);
             throw invalidCredentials();
         }
 
+        if (user.isTwoFactorEnabled()) {
+            if (request.totpCode() == null || request.totpCode().isBlank()) {
+                throw new TwoFactorRequiredException();
+            }
+            if (!totpService.verifyCode(user.getTwoFactorSecret(), request.totpCode())) {
+                recordFailedLoginAndMaybeNotify(user);
+                throw invalidCredentials();
+            }
+        }
+
         user.recordSuccessfulLogin();
+        Audit.log("LOGIN_SUCCESS", "userId={}", user.getId());
         return createTokenPair(user);
     }
 
@@ -86,6 +105,15 @@ public class AuthService {
     @Transactional
     public void logout(String rawRefreshToken) {
         refreshTokenRepository.findByTokenHash(hashToken(rawRefreshToken)).ifPresent(token -> token.setRevoked(true));
+    }
+
+    private void recordFailedLoginAndMaybeNotify(User user) {
+        user.recordFailedLogin(maxFailedLoginAttempts, lockoutDuration);
+        Audit.log("LOGIN_FAILURE", "userId={} failedAttempts={}", user.getId(), user.getFailedLoginAttempts());
+        if (user.isLocked()) {
+            notificationService.notify(user.getId(), "SECURITY_ALERT",
+                    "Your account was locked after too many failed login attempts.");
+        }
     }
 
     private AuthResponse createTokenPair(User user) {

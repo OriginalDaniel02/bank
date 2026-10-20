@@ -1,7 +1,10 @@
 package danbank;
 
+import danbank.account.dtos.PageResponse;
 import danbank.address.dto.AddressRequest;
 import danbank.address.services.AddressService;
+import danbank.notification.service.NotificationService;
+import danbank.security.TotpService;
 import danbank.user.dto.ChangePassword;
 import danbank.user.dto.UserRequest;
 import danbank.user.dto.UserResponse;
@@ -19,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -54,11 +58,17 @@ class UserServiceTest {
     @Mock
     private BvnHash bvnHash;
 
+    @Mock
+    private TotpService totpService;
+
+    @Mock
+    private NotificationService notificationService;
+
     private UserService userService;
 
     @BeforeEach
     void setUp() {
-        userService = new UserService(userRepository, passwordEncoder, addressService, bvnHash);
+        userService = new UserService(userRepository, passwordEncoder, addressService, bvnHash, totpService, notificationService);
     }
 
     // ---------- signUp ----------
@@ -71,7 +81,11 @@ class UserServiceTest {
         when(userRepository.existsByPhoneNumber(anyString())).thenReturn(false);
         when(userRepository.existsByBvnHash("hashed-bvn")).thenReturn(false);
         when(passwordEncoder.encode(request.password())).thenReturn("encoded-password");
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
+            User saved = invocation.getArgument(0);
+            ReflectionTestUtils.setField(saved, "id", 1L);
+            return saved;
+        });
 
         UserResponse response = userService.signUp(request);
 
@@ -141,11 +155,12 @@ class UserServiceTest {
     @Test
     void getAllUsers_returnsAllUsersMappedToDto() {
         List<User> allUsers = List.of(createUser(), createUser(), createUser());
-        when(userRepository.findAll()).thenReturn(allUsers);
+        when(userRepository.findAll(any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(allUsers));
 
-        List<UserResponse> response = userService.getAllUsers();
+        PageResponse<UserResponse> response = userService.getAllUsers(PageRequest.of(0, 20));
 
-        assertEquals(allUsers.size(), response.size());
+        assertEquals(allUsers.size(), response.content().size());
     }
 
     // ---------- getUserByEmail ----------

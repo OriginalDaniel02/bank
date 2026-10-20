@@ -8,5 +8,8 @@ public record LoginRequest(
         @Email(message = "Email address is invalid")
         String email,
         @NotBlank(message = "Email is required")
-        String password) {
+        String password,
+        // Required only when the account has two-factor authentication enabled.
+        String totpCode
+) {
 }

@@ -1,5 +1,6 @@
 package danbank.user.controller;
 
+import danbank.account.dtos.PageResponse;
 import danbank.common.dto.ApiResponse;
 import danbank.user.dto.ChangePassword;
 import danbank.user.dto.UserRequest;
@@ -9,6 +10,8 @@ import danbank.user.service.UserService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -23,19 +26,23 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
-
 @RestController
 @RequestMapping("/api/v1/users")
 @RequiredArgsConstructor
 public class UserController {
 
+    private static final int MAX_PAGE_SIZE = 100;
+
     private final UserService userService;
 
     @GetMapping
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<List<UserResponse>>> getAllUsers() {
-        return ResponseEntity.ok(ApiResponse.ok("Users found", userService.getAllUsers()));
+    public ResponseEntity<ApiResponse<PageResponse<UserResponse>>> getAllUsers(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        Pageable pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE));
+        return ResponseEntity.ok(ApiResponse.ok("Users found", userService.getAllUsers(pageable)));
     }
 
     @GetMapping(params = "email")

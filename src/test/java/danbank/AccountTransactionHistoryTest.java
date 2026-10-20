@@ -10,6 +10,7 @@ import danbank.account.repository.AccountRepo;
 import danbank.account.repository.AccountTransactionRepository;
 import danbank.account.service.AccountServ;
 import danbank.common.dto.ApiResponse;
+import danbank.notification.service.NotificationService;
 import danbank.user.model.User;
 import danbank.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +22,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
@@ -51,11 +53,14 @@ class AccountTransactionHistoryTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private NotificationService notificationService;
+
     private AccountServ accountService;
 
     @BeforeEach
     void setUp() {
-        accountService = new AccountServ(accountRepository, transactionRepository, userRepository, DAILY_DEBIT_LIMIT);
+        accountService = new AccountServ(accountRepository, transactionRepository, userRepository, notificationService, DAILY_DEBIT_LIMIT);
     }
 
     @Test
@@ -68,10 +73,11 @@ class AccountTransactionHistoryTest {
         );
 
         Page<AccountTransaction> page = new PageImpl<>(List.of(transaction));
-        when(transactionRepository.findByAccount_IdOrderByCreatedAtDesc(eq(1L), any(Pageable.class)))
+        when(transactionRepository.findAll(any(Specification.class), any(Pageable.class)))
                 .thenReturn(page);
 
-        ApiResponse<PageResponse<TransactionDto>> response = accountService.getTransactionHistory(1L, 0, 20);
+        ApiResponse<PageResponse<TransactionDto>> response =
+                accountService.getTransactionHistory(1L, 0, 20, null, null, null);
 
         assertEquals("Transactions found", response.message());
         assertEquals(1, response.data().content().size());
@@ -85,21 +91,21 @@ class AccountTransactionHistoryTest {
     void throwsNotFoundWhenAccountDoesNotExist() {
         when(accountRepository.findById(99L)).thenReturn(Optional.empty());
 
-        assertThrows(AccountNotFoundException.class, () -> accountService.getTransactionHistory(99, 0, 20));
-        verify(transactionRepository, never()).findByAccount_IdOrderByCreatedAtDesc(anyLong(), any());
+        assertThrows(AccountNotFoundException.class, () -> accountService.getTransactionHistory(99, 0, 20, null, null, null));
+        verify(transactionRepository, never()).findAll(any(Specification.class), any(Pageable.class));
     }
 
     @Test
     void clampsPageAndSizeToSafeBounds() {
         Account account = testAccount();
         when(accountRepository.findById(1L)).thenReturn(Optional.of(account));
-        when(transactionRepository.findByAccount_IdOrderByCreatedAtDesc(eq(1L), any(Pageable.class)))
+        when(transactionRepository.findAll(any(Specification.class), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of()));
 
-        accountService.getTransactionHistory(1L, -5, 5000);
+        accountService.getTransactionHistory(1L, -5, 5000, null, null, null);
 
         ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
-        verify(transactionRepository).findByAccount_IdOrderByCreatedAtDesc(eq(1L), pageableCaptor.capture());
+        verify(transactionRepository).findAll(any(Specification.class), pageableCaptor.capture());
 
         assertEquals(0, pageableCaptor.getValue().getPageNumber());
         assertEquals(100, pageableCaptor.getValue().getPageSize());

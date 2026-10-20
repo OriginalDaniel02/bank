@@ -1,0 +1,2 @@
+ALTER TABLE users ADD COLUMN two_factor_secret VARCHAR(32);
+ALTER TABLE users ADD COLUMN two_factor_enabled BOOLEAN NOT NULL DEFAULT FALSE;

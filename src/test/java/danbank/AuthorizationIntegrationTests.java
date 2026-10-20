@@ -1,12 +1,14 @@
 package danbank;
 
 import danbank.account.dtos.MoneyRequest;
+import danbank.account.model.Currency;
 import danbank.account.repository.AccountRepo;
 import danbank.account.repository.AccountTransactionRepository;
 import danbank.account.service.AccountServ;
 import danbank.address.repository.AddressRepository;
 import danbank.auth.TokenService;
 import danbank.auth.repository.RefreshTokenRepository;
+import danbank.notification.repository.NotificationRepository;
 import danbank.user.model.Role;
 import danbank.user.model.User;
 import danbank.user.repository.UserRepository;
@@ -46,6 +48,7 @@ class AuthorizationIntegrationTests {
     @Autowired private AddressRepository addressRepository;
     @Autowired private UserRepository userRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private NotificationRepository notificationRepository;
 
     private User alice;
     private User bob;
@@ -55,6 +58,7 @@ class AuthorizationIntegrationTests {
 
     @BeforeEach
     void setUp() {
+        notificationRepository.deleteAll();
         transactionRepository.deleteAll();
         refreshTokenRepository.deleteAll();
         accountRepository.deleteAll();
@@ -66,9 +70,9 @@ class AuthorizationIntegrationTests {
         admin = createUser();
         jdbcTemplate.update("UPDATE users SET role = ? WHERE id = ?", Role.ADMIN.name(), admin.getId());
 
-        aliceAccountId = accountService.createAccount(alice.getId()).data().id();
-        bobAccountId = accountService.createAccount(bob.getId()).data().id();
-        accountService.credit(aliceAccountId, new MoneyRequest(new BigDecimal("100.00"), "seed"));
+        aliceAccountId = accountService.createAccount(alice.getId(), Currency.NGN).data().id();
+        bobAccountId = accountService.createAccount(bob.getId(), Currency.NGN).data().id();
+        accountService.credit(aliceAccountId, new MoneyRequest(new BigDecimal("100.00"), "seed", null));
     }
 
     @Test
@@ -101,7 +105,7 @@ class AuthorizationIntegrationTests {
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/accounts/all").header("Authorization", bearer(admin)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(2));
+                .andExpect(jsonPath("$.data.content.length()").value(2));
     }
 
     @Test

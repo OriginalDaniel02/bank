@@ -6,15 +6,22 @@ import danbank.account.dtos.MoneyRequest;
 import danbank.account.dtos.PageResponse;
 import danbank.account.dtos.TransactionDto;
 import danbank.account.dtos.TransferRequest;
+import danbank.account.exception.AccountNotActiveException;
 import danbank.account.exception.AccountNotFoundException;
 import danbank.account.exception.AccountOwnerNotFoundException;
+import danbank.account.exception.InsufficientFundsException;
 import danbank.account.model.Account;
 import danbank.account.model.AccountStatus;
 import danbank.account.model.AccountTransaction;
+import danbank.account.model.Currency;
 import danbank.account.model.TransactionType;
 import danbank.account.repository.AccountRepo;
 import danbank.account.repository.AccountTransactionRepository;
+import danbank.common.audit.Audit;
 import danbank.common.dto.ApiResponse;
+import danbank.common.exception.BadRequestException;
+import danbank.common.exception.ConflictException;
+import danbank.notification.service.NotificationService;
 import danbank.user.exception.UserNotFoundException;
 import danbank.user.model.User;
 import danbank.user.repository.UserRepository;
@@ -22,10 +29,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.http.HttpStatus;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -33,6 +39,7 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -45,6 +52,7 @@ public class AccountServ {
     private final AccountRepo accountRepository;
     private final AccountTransactionRepository transactionRepository;
     private final UserRepository userRepository;
+    private final NotificationService notificationService;
     private final SecureRandom random = new SecureRandom();
     private final BigDecimal dailyDebitLimit;
 
@@ -52,16 +60,18 @@ public class AccountServ {
             AccountRepo accountRepository,
             AccountTransactionRepository transactionRepository,
             UserRepository userRepository,
+            NotificationService notificationService,
             @Value("${bank.limits.daily-debit-limit}") BigDecimal dailyDebitLimit
     ) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
         this.userRepository = userRepository;
+        this.notificationService = notificationService;
         this.dailyDebitLimit = dailyDebitLimit;
     }
 
     @Transactional
-    public ApiResponse<AccountDto> createAccount(long userId) {
+    public ApiResponse<AccountDto> createAccount(long userId, Currency currency) {
         User user = userRepository.findById(userId)
                 .orElseThrow(UserNotFoundException::new);
 
@@ -69,18 +79,20 @@ public class AccountServ {
                 .user(user)
                 .accountName((user.getFirstName() + " " + user.getLastName()).strip())
                 .accountNumber(generateUniqueAccountNumber())
+                .currency(currency)
                 .build();
 
         Account savedAccount = accountRepository.save(account);
+        Audit.log("ACCOUNT_CREATED", "accountId={} userId={}", savedAccount.getId(), userId);
         return ApiResponse.ok("Account created", toDto(savedAccount));
     }
 
     @Transactional(readOnly = true)
-    public ApiResponse<List<AccountDto>> getAllUserAccount() {
-        List<AccountDto> accounts = accountRepository.findAll().stream()
-                .map(this::toDto)
-                .toList();
-        return ApiResponse.ok("Accounts found", accounts);
+    public ApiResponse<PageResponse<AccountDto>> getAllUserAccount(Pageable pageable) {
+        Page<AccountDto> page = accountRepository.findAll(pageable).map(this::toDto);
+        return ApiResponse.ok("Accounts found", new PageResponse<>(
+                page.getContent(), page.getNumber(), page.getSize(), page.getTotalElements(), page.getTotalPages()
+        ));
     }
 
     @Transactional(readOnly = true)
@@ -97,11 +109,19 @@ public class AccountServ {
     }
 
     @Transactional(readOnly = true)
-    public ApiResponse<PageResponse<TransactionDto>> getTransactionHistory(long accountId, int page, int size) {
+    public ApiResponse<PageResponse<TransactionDto>> getTransactionHistory(
+            long accountId, int page, int size, TransactionType type, Instant from, Instant to
+    ) {
         findAccount(accountId);
 
-        Pageable pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE));
-        Page<AccountTransaction> transactions = transactionRepository.findByAccount_IdOrderByCreatedAtDesc(accountId, pageable);
+        Pageable pageable = PageRequest.of(
+                Math.max(page, 0),
+                Math.min(Math.max(size, 1), MAX_PAGE_SIZE),
+                Sort.by(Sort.Direction.DESC, "createdAt")
+        );
+        Page<AccountTransaction> transactions = transactionRepository.findAll(
+                TransactionSpecs.matching(accountId, type, from, to), pageable
+        );
 
         PageResponse<TransactionDto> pageResponse = new PageResponse<>(
                 transactions.map(this::toDto).getContent(),
@@ -113,20 +133,43 @@ public class AccountServ {
         return ApiResponse.ok("Transactions found", pageResponse);
     }
 
+    /** Every matching transaction, unpaged and oldest-first, for a downloadable statement. */
+    @Transactional(readOnly = true)
+    public List<TransactionDto> getTransactionsForStatement(long accountId, TransactionType type, Instant from, Instant to) {
+        findAccount(accountId);
+        Sort oldestFirst = Sort.by(Sort.Direction.ASC, "createdAt");
+        return transactionRepository.findAll(TransactionSpecs.matching(accountId, type, from, to), oldestFirst)
+                .stream()
+                .map(this::toDto)
+                .toList();
+    }
+
     @Transactional
     public ApiResponse<TransactionDto> credit(long accountId, MoneyRequest request) {
+        Optional<TransactionDto> existing = findByIdempotencyKey(request.idempotencyKey());
+        if (existing.isPresent()) {
+            return ApiResponse.ok("Account credited", existing.get());
+        }
+
         Account account = findActiveAccountWithLock(accountId);
         BigDecimal amount = normalizeMoney(request.amount());
         account.credit(amount);
 
         TransactionDto transaction = recordTransaction(
-                account, TransactionType.CREDIT, amount, request.description()
+                account, TransactionType.CREDIT, amount, request.description(), request.idempotencyKey(), null
         );
+        Audit.log("ACCOUNT_CREDIT", "accountId={} amount={}", accountId, amount);
+        notifyOwner(account, "Your account %s was credited %s %s".formatted(account.getAccountNumber(), account.getCurrency(), amount));
         return ApiResponse.ok("Account credited", transaction);
     }
 
     @Transactional
     public ApiResponse<TransactionDto> debit(long accountId, MoneyRequest request) {
+        Optional<TransactionDto> existing = findByIdempotencyKey(request.idempotencyKey());
+        if (existing.isPresent()) {
+            return ApiResponse.ok("Account debited", existing.get());
+        }
+
         Account account = findActiveAccountWithLock(accountId);
         BigDecimal amount = normalizeMoney(request.amount());
         ensureSufficientFunds(account, amount);
@@ -134,18 +177,22 @@ public class AccountServ {
         account.debit(amount);
 
         TransactionDto transaction = recordTransaction(
-                account, TransactionType.DEBIT, amount, request.description()
+                account, TransactionType.DEBIT, amount, request.description(), request.idempotencyKey(), null
         );
+        Audit.log("ACCOUNT_DEBIT", "accountId={} amount={}", accountId, amount);
+        notifyOwner(account, "Your account %s was debited %s %s".formatted(account.getAccountNumber(), account.getCurrency(), amount));
         return ApiResponse.ok("Account debited", transaction);
     }
 
     @Transactional
     public ApiResponse<List<TransactionDto>> transfer(TransferRequest request) {
+        Optional<List<TransactionDto>> existing = findByTransferGroup(request.idempotencyKey());
+        if (existing.isPresent()) {
+            return ApiResponse.ok("Transfer completed", existing.get());
+        }
+
         if (request.fromAccountId().equals(request.toAccountId())) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "Source and destination accounts must differ"
-            );
+            throw new BadRequestException("Source and destination accounts must differ");
         }
 
         // Always take locks in account-id order. This prevents A->B and B->A deadlocks.
@@ -156,6 +203,13 @@ public class AccountServ {
 
         Account sourceAccount = request.fromAccountId() == lowerId ? lowerAccount : higherAccount;
         Account destinationAccount = request.toAccountId() == lowerId ? lowerAccount : higherAccount;
+
+        if (sourceAccount.getCurrency() != destinationAccount.getCurrency()) {
+            throw new BadRequestException(
+                    "Cannot transfer between accounts in different currencies (this bank does not convert currencies)"
+            );
+        }
+
         BigDecimal amount = normalizeMoney(request.amount());
 
         ensureSufficientFunds(sourceAccount, amount);
@@ -163,11 +217,15 @@ public class AccountServ {
         sourceAccount.debit(amount);
         destinationAccount.credit(amount);
 
-        String transferGroup = UUID.randomUUID().toString();
+        String transferGroup = request.idempotencyKey() != null ? request.idempotencyKey() : UUID.randomUUID().toString();
         List<TransactionDto> transactionEntries = List.of(
-                recordTransaction(sourceAccount, TransactionType.TRANSFER_OUT, amount, request.description(), transferGroup),
-                recordTransaction(destinationAccount, TransactionType.TRANSFER_IN, amount, request.description(), transferGroup)
+                recordTransaction(sourceAccount, TransactionType.TRANSFER_OUT, amount, request.description(), null, transferGroup),
+                recordTransaction(destinationAccount, TransactionType.TRANSFER_IN, amount, request.description(), null, transferGroup)
         );
+
+        Audit.log("TRANSFER", "from={} to={} amount={}", sourceAccount.getId(), destinationAccount.getId(), amount);
+        notifyOwner(sourceAccount, "%s %s was transferred out of your account %s".formatted(amount, sourceAccount.getCurrency(), sourceAccount.getAccountNumber()));
+        notifyOwner(destinationAccount, "%s %s was transferred into your account %s".formatted(amount, destinationAccount.getCurrency(), destinationAccount.getAccountNumber()));
         return ApiResponse.ok("Transfer completed", transactionEntries);
     }
 
@@ -175,17 +233,22 @@ public class AccountServ {
     public ApiResponse<AccountDto> deActivateAccount(long userId, long accountId) {
         Account account = findOwnedAccount(userId, accountId);
         account.deactivate();
+        Audit.log("ACCOUNT_DEACTIVATED", "accountId={} userId={}", accountId, userId);
         return ApiResponse.ok("Account deactivated", toDto(account));
     }
 
     @Transactional
-    public ApiResponse<AccountDto> deleteAccount(long userId, long accountId) {
+    public ApiResponse<AccountDto> closeAccount(long userId, long accountId) {
         Account account = findOwnedAccount(userId, accountId);
-        if (account.getBalance().signum() != 0) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Only zero-balance accounts can be deleted");
+        if (account.getStatus() == AccountStatus.CLOSED) {
+            throw new ConflictException("Account has already been closed");
         }
-        accountRepository.delete(account);
-        return ApiResponse.ok("Account deleted", toDto(account));
+        if (account.getBalance().signum() != 0) {
+            throw new ConflictException("Only zero-balance accounts can be closed");
+        }
+        account.close();
+        Audit.log("ACCOUNT_CLOSED", "accountId={} userId={}", accountId, userId);
+        return ApiResponse.ok("Account closed", toDto(account));
     }
 
     @Transactional
@@ -206,7 +269,7 @@ public class AccountServ {
         Account account = accountRepository.findWithLockById(accountId)
                 .orElseThrow(AccountOwnerNotFoundException::new);
         if (account.getStatus() != AccountStatus.ACTIVE) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Account is not active");
+            throw new AccountNotActiveException();
         }
         return account;
     }
@@ -222,7 +285,7 @@ public class AccountServ {
 
     private void ensureSufficientFunds(Account account, BigDecimal amount) {
         if (account.getBalance().compareTo(amount) < 0) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Insufficient funds");
+            throw new InsufficientFundsException();
         }
     }
 
@@ -230,15 +293,31 @@ public class AccountServ {
         Instant startOfDay = Instant.now().truncatedTo(ChronoUnit.DAYS);
         BigDecimal alreadySpentToday = transactionRepository.sumOutgoingSince(account.getId(), startOfDay);
         if (alreadySpentToday.add(amount).compareTo(dailyDebitLimit) > 0) {
-            throw new ResponseStatusException(
-                    HttpStatus.CONFLICT,
-                    "This transaction would exceed the daily debit limit of " + dailyDebitLimit
-            );
+            throw new ConflictException("This transaction would exceed the daily debit limit of " + dailyDebitLimit);
         }
     }
 
     private BigDecimal normalizeMoney(BigDecimal amount) {
         return amount.setScale(2, RoundingMode.UNNECESSARY);
+    }
+
+    private void notifyOwner(Account account, String message) {
+        notificationService.notify(account.getUser().getId(), "TRANSACTION", message);
+    }
+
+    private Optional<TransactionDto> findByIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null) {
+            return Optional.empty();
+        }
+        return transactionRepository.findByReference(idempotencyKey).map(this::toDto);
+    }
+
+    private Optional<List<TransactionDto>> findByTransferGroup(String transferGroup) {
+        if (transferGroup == null) {
+            return Optional.empty();
+        }
+        List<AccountTransaction> existing = transactionRepository.findByTransferGroupOrderByIdAsc(transferGroup);
+        return existing.isEmpty() ? Optional.empty() : Optional.of(existing.stream().map(this::toDto).toList());
     }
 
     private String generateUniqueAccountNumber() {
@@ -259,16 +338,13 @@ public class AccountServ {
         return digits.toString();
     }
 
-    private TransactionDto recordTransaction(Account account, TransactionType type, BigDecimal amount, String description) {
+    private TransactionDto recordTransaction(
+            Account account, TransactionType type, BigDecimal amount, String description,
+            String clientReference, String transferGroup
+    ) {
+        String reference = clientReference != null ? clientReference : UUID.randomUUID().toString();
         AccountTransaction savedTransaction = transactionRepository.save(
-                new AccountTransaction(account, type, amount, UUID.randomUUID().toString(), description)
-        );
-        return toDto(savedTransaction);
-    }
-
-    private TransactionDto recordTransaction(Account account, TransactionType type, BigDecimal amount, String description, String transferGroup) {
-        AccountTransaction savedTransaction = transactionRepository.save(
-                new AccountTransaction(account, type, amount, UUID.randomUUID().toString(), transferGroup, description)
+                new AccountTransaction(account, type, amount, reference, transferGroup, description)
         );
         return toDto(savedTransaction);
     }
