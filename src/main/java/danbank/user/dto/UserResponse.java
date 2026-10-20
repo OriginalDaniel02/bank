@@ -15,6 +15,7 @@ public record UserResponse(
         String bvnLast4,
         LocalDate dateOfBirth,
         UserStatus status,
+        boolean twoFactorEnabled,
         Instant lastLoginAt
 ) {
     public static UserResponse from(User user) {
@@ -27,6 +28,7 @@ public record UserResponse(
                 user.getBvnLast4(),
                 user.getDateOfBirth(),
                 user.getStatus(),
+                user.isTwoFactorEnabled(),
                 user.getLastLoginAt()
         );
     }

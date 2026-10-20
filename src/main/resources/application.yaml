@@ -49,3 +49,5 @@ bank:
   interest:
     savings-annual-rate: 0.015
     accrual-cron: "0 0 1 * * *"
+  rate-limit:
+    requests-per-minute: 20

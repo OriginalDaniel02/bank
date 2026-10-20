@@ -57,8 +57,9 @@ public class Account {
     @Column(nullable = false)
     private AccountStatus status;
 
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 3, updatable = false)
-    private String currency;
+    private Currency currency;
 
     @Version
     private long version;
@@ -82,14 +83,14 @@ public class Account {
     }
 
     @Builder
-    public Account(User user, String accountName, String accountNumber) {
+    public Account(User user, String accountName, String accountNumber, Currency currency) {
         this.user = Objects.requireNonNull(user, "User is required");
         this.accountName = Objects.requireNonNull(accountName, "Account name is required").strip();
         this.accountNumber = Objects.requireNonNull(accountNumber, "Account number is required");
         this.balance = BigDecimal.ZERO.setScale(2, RoundingMode.UNNECESSARY);
         this.type = AccountType.SAVINGS;
         this.status = AccountStatus.ACTIVE;
-        this.currency = "NGN";
+        this.currency = currency != null ? currency : Currency.NGN;
     }
 
     public void credit(BigDecimal amount) {
@@ -119,6 +120,16 @@ public class Account {
             throw new IllegalStateException("Account has already been closed");
         }
         this.status = AccountStatus.NOT_ACTIVE;
+    }
+
+    public void close() {
+        if (status == AccountStatus.CLOSED) {
+            throw new IllegalStateException("Account has already been closed");
+        }
+        if (balance.signum() != 0) {
+            throw new IllegalStateException("Only zero-balance accounts can be closed");
+        }
+        this.status = AccountStatus.CLOSED;
     }
 
     public void changeType(AccountType newType) {

@@ -6,6 +6,8 @@ import danbank.account.model.AccountType;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -18,7 +20,8 @@ public interface AccountRepo extends JpaRepository<Account, Long> {
 
     boolean existsByAccountNumber(String accountNumber);
 
-    List<Account> findByTypeAndStatus(AccountType type, AccountStatus status);
+    @Query("select a.id from Account a where a.type = :type and a.status = :status")
+    List<Long> findIdsByTypeAndStatus(@Param("type") AccountType type, @Param("status") AccountStatus status);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<Account> findWithLockById(Long accountId);

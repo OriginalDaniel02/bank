@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.Objects;
 
 @Entity
 @Table(name = "users")
@@ -71,6 +72,12 @@ public class User {
     private Instant lockedUntil;
 
     private Instant lastLoginAt;
+
+    @Column(length = 32)
+    private String twoFactorSecret;
+
+    @Column(nullable = false)
+    private boolean twoFactorEnabled;
 
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
@@ -149,6 +156,27 @@ public class User {
         if (this.failedLoginAttempts >= maxAttempts) {
             this.lockedUntil = Instant.now().plus(lockoutDuration);
         }
+    }
+
+    /** Stores a newly generated secret without turning 2FA on yet - the caller must confirm a code first. */
+    public void startTwoFactorSetup(String secret) {
+        requireActive();
+        this.twoFactorSecret = Objects.requireNonNull(secret, "Secret is required");
+        this.twoFactorEnabled = false;
+    }
+
+    public void enableTwoFactor() {
+        requireActive();
+        if (twoFactorSecret == null) {
+            throw new IllegalStateException("Call startTwoFactorSetup before enabling two-factor authentication");
+        }
+        this.twoFactorEnabled = true;
+    }
+
+    public void disableTwoFactor() {
+        requireActive();
+        this.twoFactorEnabled = false;
+        this.twoFactorSecret = null;
     }
 
     public static String lastFourDigits(String value) {

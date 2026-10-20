@@ -2,12 +2,14 @@ package danbank;
 
 import danbank.account.dtos.AccountDto;
 import danbank.account.dtos.MoneyRequest;
+import danbank.account.model.Currency;
 import danbank.account.dtos.TransferRequest;
 import danbank.account.repository.AccountRepo;
 import danbank.account.repository.AccountTransactionRepository;
 import danbank.account.service.AccountServ;
 import danbank.address.repository.AddressRepository;
 import danbank.auth.repository.RefreshTokenRepository;
+import danbank.notification.repository.NotificationRepository;
 import danbank.user.model.User;
 import danbank.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,9 +57,13 @@ class AccountConcurrencyIntegrationTests {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private NotificationRepository notificationRepository;
+
     @BeforeEach
     void clearDatabase() {
         // Delete child records first so foreign-key constraints are respected.
+        notificationRepository.deleteAll();
         transactionRepository.deleteAll();
         refreshTokenRepository.deleteAll();
         accountRepository.deleteAll();
@@ -68,10 +74,10 @@ class AccountConcurrencyIntegrationTests {
     @Test
     void concurrentDebitsDoNotLoseBalanceUpdates() throws Exception {
         long accountId = createAccountForNewUser();
-        accountService.credit(accountId, new MoneyRequest(new BigDecimal("100.00"), "Initial balance"));
+        accountService.credit(accountId, new MoneyRequest(new BigDecimal("100.00"), "Initial balance", null));
 
         runConcurrently(NUMBER_OF_REQUESTS, () ->
-                accountService.debit(accountId, new MoneyRequest(REQUEST_AMOUNT, "Concurrent debit"))
+                accountService.debit(accountId, new MoneyRequest(REQUEST_AMOUNT, "Concurrent debit", null))
         );
 
         BigDecimal finalBalance = accountRepository.findById(accountId).orElseThrow().getBalance();
@@ -85,14 +91,15 @@ class AccountConcurrencyIntegrationTests {
     void concurrentTransfersPreserveTotalMoneyAndCreateBothLedgerEntries() throws Exception {
         long sourceAccountId = createAccountForNewUser();
         long destinationAccountId = createAccountForNewUser();
-        accountService.credit(sourceAccountId, new MoneyRequest(new BigDecimal("100.00"), "Initial balance"));
+        accountService.credit(sourceAccountId, new MoneyRequest(new BigDecimal("100.00"), "Initial balance", null));
 
         runConcurrently(NUMBER_OF_REQUESTS, () ->
                 accountService.transfer(new TransferRequest(
                         sourceAccountId,
                         destinationAccountId,
                         REQUEST_AMOUNT,
-                        "Concurrent transfer"
+                        "Concurrent transfer",
+                        null
                 ))
         );
 
@@ -120,7 +127,7 @@ class AccountConcurrencyIntegrationTests {
                 .build();
 
         User savedUser = userRepository.save(user);
-        AccountDto account = accountService.createAccount(savedUser.getId()).data();
+        AccountDto account = accountService.createAccount(savedUser.getId(), Currency.NGN).data();
         return account.id();
     }
 

@@ -1,18 +1,24 @@
 package danbank.account.repository;
 
 import danbank.account.model.AccountTransaction;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 
-public interface AccountTransactionRepository extends JpaRepository<AccountTransaction, Long> {
+public interface AccountTransactionRepository
+        extends JpaRepository<AccountTransaction, Long>, JpaSpecificationExecutor<AccountTransaction> {
 
-    Page<AccountTransaction> findByAccount_IdOrderByCreatedAtDesc(Long accountId, Pageable pageable);
+    Optional<AccountTransaction> findByReference(String reference);
+
+    boolean existsByReference(String reference);
+
+    List<AccountTransaction> findByTransferGroupOrderByIdAsc(String transferGroup);
 
     @Query("""
             select coalesce(sum(t.amount), 0)

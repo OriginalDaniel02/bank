@@ -18,7 +18,11 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilter jwtAuthenticationFilter) throws Exception {
+    public SecurityFilterChain securityFilterChain(
+            HttpSecurity http,
+            JwtAuthenticationFilter jwtAuthenticationFilter,
+            RateLimitingFilter rateLimitingFilter
+    ) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -36,6 +40,7 @@ public class SecurityConfig {
                         .authenticationEntryPoint((request, response, error) ->
                                 response.sendError(HttpStatus.UNAUTHORIZED.value(), "Authentication is required"))
                 )
+                .addFilterBefore(rateLimitingFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
