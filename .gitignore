@@ -38,3 +38,6 @@ branch_structure.json
 temp_auto_push.bat
 temp_interactive_push.bat
 .gitignore
+
+# Editor config is local. A committed .vscode/tasks.json can auto-run commands on folder open.
+.vscode/
