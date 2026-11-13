@@ -86,7 +86,7 @@ public class AccountService {
 
     @Transactional(readOnly = true)
     public AccountResponse<List<AccountDto>> getAccountsForUser(long userId) {
-        List<AccountDto> accounts = accountRepository.findByUser_Id(userId).stream()
+        List<AccountDto> accounts = accountRepository.findByUser_IdAndStatusNot(userId, AccountStatus.CLOSED).stream()
                 .map(this::toDto)
                 .toList();
         return new AccountResponse<>("Accounts found", accounts);
@@ -239,18 +239,28 @@ public class AccountService {
     }
 
     @Transactional
+    /**
+     * Closes an account. It is never deleted: its transactions are the bank's record of what happened, so the row
+     * stays and only its status changes. A closed account disappears from the owner's lists and cannot send or receive.
+     */
     public AccountResponse<AccountDto> deleteAccount(Long userId, Long accountId) {
         Account account = findOwnedAccount(userId, accountId);
-        if (account.getBalance().signum() != 0) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Only zero-balance accounts can be deleted");
+        if (account.getStatus() == AccountStatus.CLOSED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This account is already closed");
         }
-        accountRepository.delete(account);
-        return new AccountResponse<>("Account deleted", null);
+        if (account.getBalance().signum() != 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Move or withdraw the remaining balance before closing this account");
+        }
+        account.setStatus(AccountStatus.CLOSED);
+        return new AccountResponse<>("Account closed", toDto(account));
     }
 
     @Transactional
     public AccountResponse<AccountDto> updateAccount(Long accountId, Long userId, AccountUpdate update) {
         Account account = findOwnedAccount(userId, accountId);
+        if (account.getStatus() == AccountStatus.CLOSED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This account is closed");
+        }
         if (account.getStatus() == AccountStatus.DISABLED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Account is disabled");
         }

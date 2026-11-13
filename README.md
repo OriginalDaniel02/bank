@@ -279,6 +279,8 @@ Amounts must be at least `0.01` and have at most 2 decimal places.
 - Transfers need the transaction PIN. Five wrong attempts lock it for 15 minutes.
 - Direct credit and debit are admin-only.
 - CSRF is disabled because the API is stateless and token-based.
+- **Sign-in protection:** after 5 wrong passwords for one email or phone number, sign-in is refused for 15 minutes (even with the right password). Failures are stored hashed, tracked the same way for accounts that don't exist (so the response never reveals whether an account is real), and every sign-in does one password check regardless, so timing doesn't reveal it either. Separately, one address can make at most 60 sign-in/sign-up requests a minute (`bank.security.auth-requests-per-minute`); that limit is in memory, so in production also rate-limit at your proxy.
+- **Closing an account** keeps it and its full history (status `CLOSED`). It needs a zero balance, disappears from the owner's lists, and can no longer send or receive.
 
 ## Card Deposits (Paystack)
 
