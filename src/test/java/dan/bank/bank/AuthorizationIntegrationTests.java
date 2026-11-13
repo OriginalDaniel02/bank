@@ -34,6 +34,7 @@ class AuthorizationIntegrationTests {
     @Autowired AccountTransactionRepository transactionRepository;
     @Autowired RefreshTokenRepository refreshTokenRepository;
     @Autowired AccountServ accountService;
+    @Autowired org.springframework.security.crypto.password.PasswordEncoder encoder;
 
     private User alice;
     private User bob;
@@ -47,6 +48,8 @@ class AuthorizationIntegrationTests {
         accountRepository.deleteAll();
         userRepository.deleteAll();
         alice = newUser();
+        alice.setTransactionPinHash(encoder.encode("1234"));
+        alice = userRepository.save(alice);
         bob = newUser();
         aliceAccount = accountService.createAccount(alice.getId()).data().id();
         bobAccount = accountService.createAccount(bob.getId()).data().id();
@@ -84,7 +87,7 @@ class AuthorizationIntegrationTests {
             mvc.perform(post("/api/v1/accounts/" + aliceAccount + path)
                             .header("Authorization", bearer(bob))
                             .contentType(MediaType.APPLICATION_JSON).content(body))
-                    .andExpect(status().isNotFound());
+                    .andExpect(status().isForbidden());
         }
         mvc.perform(get("/api/v1/accounts/" + aliceAccount + "/transactions").header("Authorization", bearer(bob)))
                 .andExpect(status().isNotFound());
@@ -98,6 +101,7 @@ class AuthorizationIntegrationTests {
                 .contentType(MediaType.APPLICATION_JSON).content(steal)).andExpect(status().isNotFound());
 
         mvc.perform(post("/api/v1/accounts/transfer").header("Authorization", bearer(alice))
+                .header("X-Transaction-Pin", "1234")
                 .contentType(MediaType.APPLICATION_JSON).content(steal)).andExpect(status().isCreated());
         assertEquals(new BigDecimal("10.00"), accountRepository.findById(bobAccount).orElseThrow().getBalance());
     }
@@ -126,5 +130,43 @@ class AuthorizationIntegrationTests {
         accountRepository.deleteById(bobAccount);
         userRepository.deleteById(bob.getId());
         mvc.perform(get("/api/v1/accounts").header("Authorization", token)).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void transferNeedsCorrectPinAndLocksAfterFiveWrongAttempts() throws Exception {
+        String body = "{\"fromAccountId\":" + aliceAccount + ",\"toAccountId\":" + bobAccount + ",\"amount\":1.00}";
+        mvc.perform(post("/api/v1/accounts/transfer").header("Authorization", bearer(alice))
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden());
+        for (int i = 0; i < 4; i++) {
+            mvc.perform(post("/api/v1/accounts/transfer").header("Authorization", bearer(alice))
+                    .header("X-Transaction-Pin", "0000")
+                    .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden());
+        }
+        // Locked now, even the right PIN is refused.
+        mvc.perform(post("/api/v1/accounts/transfer").header("Authorization", bearer(alice))
+                .header("X-Transaction-Pin", "1234")
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isLocked());
+        assertEquals(new BigDecimal("50.00"), accountRepository.findById(aliceAccount).orElseThrow().getBalance());
+    }
+
+    @Test
+    void nameLookupAndTransferByAccountNumber() throws Exception {
+        String bobNumber = accountRepository.findById(bobAccount).orElseThrow().getAccountNumber();
+        mvc.perform(get("/api/v1/accounts/lookup/" + bobNumber).header("Authorization", bearer(alice)))
+                .andExpect(status().isOk());
+        String body = "{\"fromAccountId\":" + aliceAccount + ",\"toAccountNumber\":\"" + bobNumber + "\",\"amount\":5.00}";
+        mvc.perform(post("/api/v1/accounts/transfer/by-number").header("Authorization", bearer(alice))
+                .header("X-Transaction-Pin", "1234")
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isCreated());
+        assertEquals(new BigDecimal("5.00"), accountRepository.findById(bobAccount).orElseThrow().getBalance());
+    }
+
+    @Test
+    void onlyAdminCanCredit() throws Exception {
+        alice.setRole(dan.bank.bank.User.model.Role.ADMIN);
+        userRepository.save(alice);
+        mvc.perform(post("/api/v1/accounts/" + bobAccount + "/credit").header("Authorization", bearer(alice))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"amount\":20.00}")).andExpect(status().isCreated());
+        assertEquals(new BigDecimal("20.00"), accountRepository.findById(bobAccount).orElseThrow().getBalance());
     }
 }

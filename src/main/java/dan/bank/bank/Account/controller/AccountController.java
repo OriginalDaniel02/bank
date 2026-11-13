@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -30,10 +31,14 @@ public class AccountController {
 
     private final AccountServ accountService;
     private final CurrentUser currentUser;
+    private final dan.bank.bank.User.service.PinService pinService;
+    private final dan.bank.bank.Account.service.IdempotentTransferService transferService;
 
-    public AccountController(AccountServ accountService, CurrentUser currentUser) {
+    public AccountController(AccountServ accountService, CurrentUser currentUser, dan.bank.bank.User.service.PinService pinService, dan.bank.bank.Account.service.IdempotentTransferService transferService) {
         this.accountService = accountService;
         this.currentUser = currentUser;
+        this.pinService = pinService;
+        this.transferService = transferService;
     }
 
     @GetMapping
@@ -54,22 +59,22 @@ public class AccountController {
                 .body(accountService.createAccount(userId));
     }
 
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/{accountId}/credit")
     public ResponseEntity<AccountResponse<TransactionDto>> creditAccount(
             @PathVariable long accountId,
             @Valid @RequestBody MoneyRequest request
     ) {
-        accountService.requireOwnedBy(currentUser.id(), accountId);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(accountService.credit(accountId, request));
     }
 
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/{accountId}/debit")
     public ResponseEntity<AccountResponse<TransactionDto>> debitAccount(
             @PathVariable long accountId,
             @Valid @RequestBody MoneyRequest request
     ) {
-        accountService.requireOwnedBy(currentUser.id(), accountId);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(accountService.debit(accountId, request));
     }
@@ -86,12 +91,33 @@ public class AccountController {
 
     @PostMapping("/transfer")
     public ResponseEntity<AccountResponse<List<TransactionDto>>> transfer(
+            @RequestHeader(value = "X-Transaction-Pin", required = false) String pin,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody TransferRequest request
     ) {
         // You may only send money out of your own account; any active account can receive.
         accountService.requireOwnedBy(currentUser.id(), request.fromAccountId());
+        pinService.verify(currentUser.id(), pin);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(accountService.transfer(request));
+                .body(transferService.transfer(currentUser.id(), idempotencyKey, request));
+    }
+
+    @GetMapping("/lookup/{accountNumber}")
+    public ResponseEntity<AccountServ.AccountLookup> lookup(@PathVariable String accountNumber) {
+        return ResponseEntity.ok(accountService.lookupByAccountNumber(accountNumber));
+    }
+
+    @PostMapping("/transfer/by-number")
+    public ResponseEntity<AccountResponse<List<TransactionDto>>> transferByNumber(
+            @RequestHeader(value = "X-Transaction-Pin", required = false) String pin,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody dan.bank.bank.Account.dtos.TransferByNumberRequest request
+    ) {
+        accountService.requireOwnedBy(currentUser.id(), request.fromAccountId());
+        pinService.verify(currentUser.id(), pin);
+        long toAccountId = accountService.lookupByAccountNumber(request.toAccountNumber()).accountId();
+        return ResponseEntity.status(HttpStatus.CREATED).body(transferService.transfer(currentUser.id(), idempotencyKey,
+                new TransferRequest(request.fromAccountId(), toAccountId, request.amount(), request.description())));
     }
 
     @PutMapping("/{accountId}/user/{userId}")
