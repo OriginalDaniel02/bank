@@ -9,6 +9,8 @@ public interface AccountRepo extends JpaRepository<Account, Long> {
 
     Optional<Account> findByIdAndUser_Id(Long accountId, Long userId);
 
+    List<Account> findByUser_Id(Long userId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<Account> findWithLockById(Long accountId);
 
