@@ -73,6 +73,20 @@ public class AccountServ {
     }
 
     @Transactional(readOnly = true)
+    public AccountResponse<List<AccountDto>> getAccountsForUser(long userId) {
+        List<AccountDto> accounts = accountRepository.findByUser_Id(userId).stream()
+                .map(this::toDto)
+                .toList();
+        return new AccountResponse<>("Accounts found", accounts);
+    }
+
+    /** Throws 404 (not 403, to avoid leaking which ids exist) unless the account belongs to the user. */
+    @Transactional(readOnly = true)
+    public void requireOwnedBy(long userId, long accountId) {
+        findOwnedAccount(userId, accountId);
+    }
+
+    @Transactional(readOnly = true)
     public AccountResponse<AccountDto> getAccount(Long accountId) {
         return new AccountResponse<>("Account found", toDto(findAccount(accountId)));
     }
@@ -144,10 +158,12 @@ public class AccountServ {
         sourceAccount.setBalance(sourceAccount.getBalance().subtract(amount));
         destinationAccount.setBalance(destinationAccount.getBalance().add(amount));
 
-        String reference = UUID.randomUUID().toString();
+        // The reference column is unique per ledger row, so both legs share a transfer id
+        // as a prefix and are told apart by suffix.
+        String transferId = UUID.randomUUID().toString();
         List<TransactionDto> transactionEntries = List.of(
-                recordTransaction(sourceAccount, TransactionType.TRANSFER_OUT, amount, request.description(), reference),
-                recordTransaction(destinationAccount, TransactionType.TRANSFER_IN, amount, request.description(), reference)
+                recordTransaction(sourceAccount, TransactionType.TRANSFER_OUT, amount, request.description(), transferId + "-OUT"),
+                recordTransaction(destinationAccount, TransactionType.TRANSFER_IN, amount, request.description(), transferId + "-IN")
         );
         return new AccountResponse<>("Transfer completed", transactionEntries);
     }
@@ -172,6 +188,9 @@ public class AccountServ {
     @Transactional
     public AccountResponse<AccountDto> updateAccount(Long accountId, Long userId, AccountUpdate update) {
         Account account = findOwnedAccount(userId, accountId);
+        if (account.getStatus() == AccountStatus.DISABLED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Account is disabled");
+        }
         if (update.type() != null) account.setType(update.type());
         if (update.status() != null) account.setStatus(update.status());
         return new AccountResponse<>("Account updated", toDto(account));

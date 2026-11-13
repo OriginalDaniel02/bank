@@ -1,5 +1,6 @@
 package dan.bank.bank.User.controller;
 
+import dan.bank.bank.Auth.CurrentUser;
 import dan.bank.bank.User.dto.UpdateRequest;
 import dan.bank.bank.User.dto.UserDto;
 import dan.bank.bank.User.dto.UserRequest;
@@ -28,22 +29,28 @@ import java.util.List;
 public class UserController {
 
     private final UserService userService;
+    private final CurrentUser currentUser;
 
 
     @GetMapping
     public ResponseEntity<UserResponse<List<UserDto>>> getAllUsers() {
-        return ResponseEntity.ok(userService.getAllUsers());
+        // Users may only see themselves; the full user list is not exposed.
+        UserResponse<UserDto> self = userService.getUserById(currentUser.id());
+        return ResponseEntity.ok(new UserResponse<>("Users found", List.of(self.data())));
     }
 
     @GetMapping(params = "email")
     public ResponseEntity<UserResponse<UserDto>> getUserByEmail(
             @RequestParam @Email String email
     ) {
-        return ResponseEntity.ok(userService.getUserByEMail(email));
+        UserResponse<UserDto> found = userService.getUserByEMail(email);
+        currentUser.requireSelf(found.data().id());
+        return ResponseEntity.ok(found);
     }
 
     @GetMapping("/id/{id}")
     public ResponseEntity<UserResponse<UserDto>> getUser(@PathVariable Long id) {
+        currentUser.requireSelf(id);
         return ResponseEntity.ok(userService.getUserById(id));
     }
 
@@ -60,11 +67,13 @@ public class UserController {
             @PathVariable Long id,
             @Valid @RequestBody UpdateRequest request
     ) {
+        currentUser.requireSelf(id);
         return ResponseEntity.ok(userService.updateUser(id, request));
     }
 
     @DeleteMapping("/deleteUser/{id}")
     public ResponseEntity<UserResponse<UserDto>> deleteUser(@PathVariable long id) {
+        currentUser.requireSelf(id);
         return ResponseEntity.ok(userService.deleteUser(id));
     }
 }

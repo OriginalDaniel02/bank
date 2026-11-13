@@ -8,6 +8,7 @@ import dan.bank.bank.Account.dtos.PageResponse;
 import dan.bank.bank.Account.dtos.TransactionDto;
 import dan.bank.bank.Account.dtos.TransferRequest;
 import dan.bank.bank.Account.service.AccountServ;
+import dan.bank.bank.Auth.CurrentUser;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -28,23 +29,27 @@ import java.util.List;
 public class AccountController {
 
     private final AccountServ accountService;
+    private final CurrentUser currentUser;
 
-    public AccountController(AccountServ accountService) {
+    public AccountController(AccountServ accountService, CurrentUser currentUser) {
         this.accountService = accountService;
+        this.currentUser = currentUser;
     }
 
     @GetMapping
     public ResponseEntity<AccountResponse<List<AccountDto>>> getAllAccounts() {
-        return ResponseEntity.ok(accountService.getAllUserAccount());
+        return ResponseEntity.ok(accountService.getAccountsForUser(currentUser.id()));
     }
 
     @GetMapping("/{accountId}")
     public ResponseEntity<AccountResponse<AccountDto>> getAccount(@PathVariable long accountId) {
+        accountService.requireOwnedBy(currentUser.id(), accountId);
         return ResponseEntity.ok(accountService.getAccount(accountId));
     }
 
     @PostMapping("/user/{userId}")
     public ResponseEntity<AccountResponse<AccountDto>> createAccount(@PathVariable long userId) {
+        currentUser.requireSelf(userId);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(accountService.createAccount(userId));
     }
@@ -54,6 +59,7 @@ public class AccountController {
             @PathVariable long accountId,
             @Valid @RequestBody MoneyRequest request
     ) {
+        accountService.requireOwnedBy(currentUser.id(), accountId);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(accountService.credit(accountId, request));
     }
@@ -63,6 +69,7 @@ public class AccountController {
             @PathVariable long accountId,
             @Valid @RequestBody MoneyRequest request
     ) {
+        accountService.requireOwnedBy(currentUser.id(), accountId);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(accountService.debit(accountId, request));
     }
@@ -73,6 +80,7 @@ public class AccountController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
     ) {
+        accountService.requireOwnedBy(currentUser.id(), accountId);
         return ResponseEntity.ok(accountService.getTransactionHistory(accountId, page, size));
     }
 
@@ -80,6 +88,8 @@ public class AccountController {
     public ResponseEntity<AccountResponse<List<TransactionDto>>> transfer(
             @Valid @RequestBody TransferRequest request
     ) {
+        // You may only send money out of your own account; any active account can receive.
+        accountService.requireOwnedBy(currentUser.id(), request.fromAccountId());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(accountService.transfer(request));
     }
@@ -90,6 +100,7 @@ public class AccountController {
             @PathVariable long userId,
             @Valid @RequestBody AccountUpdate request
     ) {
+        currentUser.requireSelf(userId);
         return ResponseEntity.ok(accountService.updateAccount(accountId, userId, request));
     }
 
@@ -98,6 +109,7 @@ public class AccountController {
             @PathVariable long accountId,
             @PathVariable long userId
     ) {
+        currentUser.requireSelf(userId);
         return ResponseEntity.ok(accountService.deActivateAccount(userId, accountId));
     }
 
@@ -106,6 +118,7 @@ public class AccountController {
             @PathVariable long accountId,
             @PathVariable long userId
     ) {
+        currentUser.requireSelf(userId);
         return ResponseEntity.ok(accountService.deleteAccount(userId, accountId));
     }
 }
