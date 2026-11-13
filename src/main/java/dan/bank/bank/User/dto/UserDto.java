@@ -9,6 +9,6 @@ public record UserDto(
         String email,
         String phoneNumber,
         String  address,
-        LocalDate DateOfBirth
+        LocalDate dateOfBirth
 ) {
 }

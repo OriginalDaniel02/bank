@@ -37,14 +37,28 @@ public class AccountServ {
     private final AccountTransactionRepository transactionRepository;
     private final UserRepository userRepository;
 
+    private final TransferPolicy policy;
+
+    /** Without a policy there are no fees and effectively no limits. */
     public AccountServ(
             AccountRepo accountRepository,
             AccountTransactionRepository transactionRepository,
             UserRepository userRepository
     ) {
+        this(accountRepository, transactionRepository, userRepository, TransferPolicy.unrestricted());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AccountServ(
+            AccountRepo accountRepository,
+            AccountTransactionRepository transactionRepository,
+            UserRepository userRepository,
+            TransferPolicy policy
+    ) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
         this.userRepository = userRepository;
+        this.policy = policy;
     }
 
     @Transactional
@@ -70,6 +84,33 @@ public class AccountServ {
                 .map(this::toDto)
                 .toList();
         return new AccountResponse<>("Accounts found", accounts);
+    }
+
+    @Transactional(readOnly = true)
+    public AccountResponse<List<AccountDto>> getAccountsForUser(long userId) {
+        List<AccountDto> accounts = accountRepository.findByUser_Id(userId).stream()
+                .map(this::toDto)
+                .toList();
+        return new AccountResponse<>("Accounts found", accounts);
+    }
+
+    /** Name enquiry: resolve an account number to its id and holder name (like OPay's confirm-name step). */
+    @Transactional(readOnly = true)
+    public AccountLookup lookupByAccountNumber(String accountNumber) {
+        Account account = accountRepository.findByAccountNumber(accountNumber)
+                .orElseThrow(() -> notFound("Account not found"));
+        if (account.getStatus() != AccountStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Account is not active");
+        }
+        return new AccountLookup(account.getId(), account.getAccountNumber(), account.getAccountName());
+    }
+
+    public record AccountLookup(long accountId, String accountNumber, String accountName) { }
+
+    /** Throws 404 (not 403, to avoid leaking which ids exist) unless the account belongs to the user. */
+    @Transactional(readOnly = true)
+    public void requireOwnedBy(long userId, long accountId) {
+        findOwnedAccount(userId, accountId);
     }
 
     @Transactional(readOnly = true)
@@ -130,25 +171,59 @@ public class AccountServ {
             );
         }
 
-        // Always take locks in account-id order. This prevents A->B and B->A deadlocks.
-        long lowerId = Math.min(request.fromAccountId(), request.toAccountId());
-        long higherId = Math.max(request.fromAccountId(), request.toAccountId());
-        Account lowerAccount = findActiveAccountWithLock(lowerId);
-        Account higherAccount = findActiveAccountWithLock(higherId);
-
-        Account sourceAccount = request.fromAccountId() == lowerId ? lowerAccount : higherAccount;
-        Account destinationAccount = request.toAccountId() == lowerId ? lowerAccount : higherAccount;
         BigDecimal amount = normalizeMoney(request.amount());
+        BigDecimal fee = policy.feeFor(amount);
+        Long incomeAccountId = fee.signum() > 0
+                ? accountRepository.findByAccountNumber(policy.incomeAccountNumber())
+                        .orElseThrow(() -> new IllegalStateException("Fee income account is not configured correctly"))
+                        .getId()
+                : null;
 
-        ensureSufficientFunds(sourceAccount, amount);
+        // Always take locks in ascending account-id order (including the fee account).
+        // This prevents A->B / B->A deadlocks and fee-account deadlocks.
+        java.util.TreeSet<Long> lockOrder = new java.util.TreeSet<>();
+        lockOrder.add(request.fromAccountId());
+        lockOrder.add(request.toAccountId());
+        if (incomeAccountId != null) lockOrder.add(incomeAccountId);
+        java.util.Map<Long, Account> locked = new java.util.HashMap<>();
+        for (long id : lockOrder) {
+            locked.put(id, findActiveAccountWithLock(id));
+        }
+        Account sourceAccount = locked.get(request.fromAccountId());
+        Account destinationAccount = locked.get(request.toAccountId());
+
+        int kycTier = sourceAccount.getUser().getKycTier();
+        if (amount.compareTo(policy.perTransferMaxFor(kycTier)) > 0) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                    "Amount exceeds your per-transfer limit of " + policy.perTransferMaxFor(kycTier).toPlainString()
+                            + (kycTier < 1 ? ". Verify your identity to raise it" : ""));
+        }
+
+        java.time.Instant startOfDay = java.time.LocalDate.now(policy.zone()).atStartOfDay(policy.zone()).toInstant();
+        BigDecimal sentToday = transactionRepository.sumSince(sourceAccount.getId(), TransactionType.TRANSFER_OUT, startOfDay);
+        if (sentToday != null && sentToday.add(amount).compareTo(policy.dailyMaxFor(kycTier)) > 0) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                    "Daily transfer limit exceeded" + (kycTier < 1 ? ". Verify your identity to raise it" : ""));
+        }
+
+        ensureSufficientFunds(sourceAccount, amount.add(fee));
         sourceAccount.setBalance(sourceAccount.getBalance().subtract(amount));
         destinationAccount.setBalance(destinationAccount.getBalance().add(amount));
 
-        String reference = UUID.randomUUID().toString();
-        List<TransactionDto> transactionEntries = List.of(
-                recordTransaction(sourceAccount, TransactionType.TRANSFER_OUT, amount, request.description(), reference),
-                recordTransaction(destinationAccount, TransactionType.TRANSFER_IN, amount, request.description(), reference)
-        );
+        // The reference column is unique per ledger row, so all legs share a transfer id
+        // as a prefix and are told apart by suffix.
+        String transferId = UUID.randomUUID().toString();
+        List<TransactionDto> transactionEntries = new java.util.ArrayList<>(List.of(
+                recordTransaction(sourceAccount, TransactionType.TRANSFER_OUT, amount, request.description(), transferId + "-OUT"),
+                recordTransaction(destinationAccount, TransactionType.TRANSFER_IN, amount, request.description(), transferId + "-IN")
+        ));
+        if (fee.signum() > 0) {
+            Account income = locked.get(incomeAccountId);
+            sourceAccount.setBalance(sourceAccount.getBalance().subtract(fee));
+            income.setBalance(income.getBalance().add(fee));
+            recordTransaction(sourceAccount, TransactionType.FEE, fee, "Transfer fee", transferId + "-FEE");
+            recordTransaction(income, TransactionType.FEE, fee, "Transfer fee income", transferId + "-FEE-IN");
+        }
         return new AccountResponse<>("Transfer completed", transactionEntries);
     }
 
@@ -172,6 +247,9 @@ public class AccountServ {
     @Transactional
     public AccountResponse<AccountDto> updateAccount(Long accountId, Long userId, AccountUpdate update) {
         Account account = findOwnedAccount(userId, accountId);
+        if (account.getStatus() == AccountStatus.DISABLED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Account is disabled");
+        }
         if (update.type() != null) account.setType(update.type());
         if (update.status() != null) account.setStatus(update.status());
         return new AccountResponse<>("Account updated", toDto(account));

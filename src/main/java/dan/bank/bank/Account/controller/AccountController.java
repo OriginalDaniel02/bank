@@ -8,6 +8,7 @@ import dan.bank.bank.Account.dtos.PageResponse;
 import dan.bank.bank.Account.dtos.TransactionDto;
 import dan.bank.bank.Account.dtos.TransferRequest;
 import dan.bank.bank.Account.service.AccountServ;
+import dan.bank.bank.Auth.CurrentUser;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -28,27 +30,36 @@ import java.util.List;
 public class AccountController {
 
     private final AccountServ accountService;
+    private final CurrentUser currentUser;
+    private final dan.bank.bank.User.service.PinService pinService;
+    private final dan.bank.bank.Account.service.IdempotentTransferService transferService;
 
-    public AccountController(AccountServ accountService) {
+    public AccountController(AccountServ accountService, CurrentUser currentUser, dan.bank.bank.User.service.PinService pinService, dan.bank.bank.Account.service.IdempotentTransferService transferService) {
         this.accountService = accountService;
+        this.currentUser = currentUser;
+        this.pinService = pinService;
+        this.transferService = transferService;
     }
 
     @GetMapping
     public ResponseEntity<AccountResponse<List<AccountDto>>> getAllAccounts() {
-        return ResponseEntity.ok(accountService.getAllUserAccount());
+        return ResponseEntity.ok(accountService.getAccountsForUser(currentUser.id()));
     }
 
     @GetMapping("/{accountId}")
     public ResponseEntity<AccountResponse<AccountDto>> getAccount(@PathVariable long accountId) {
+        accountService.requireOwnedBy(currentUser.id(), accountId);
         return ResponseEntity.ok(accountService.getAccount(accountId));
     }
 
     @PostMapping("/user/{userId}")
     public ResponseEntity<AccountResponse<AccountDto>> createAccount(@PathVariable long userId) {
+        currentUser.requireSelf(userId);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(accountService.createAccount(userId));
     }
 
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/{accountId}/credit")
     public ResponseEntity<AccountResponse<TransactionDto>> creditAccount(
             @PathVariable long accountId,
@@ -58,6 +69,7 @@ public class AccountController {
                 .body(accountService.credit(accountId, request));
     }
 
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/{accountId}/debit")
     public ResponseEntity<AccountResponse<TransactionDto>> debitAccount(
             @PathVariable long accountId,
@@ -73,15 +85,39 @@ public class AccountController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
     ) {
+        accountService.requireOwnedBy(currentUser.id(), accountId);
         return ResponseEntity.ok(accountService.getTransactionHistory(accountId, page, size));
     }
 
     @PostMapping("/transfer")
     public ResponseEntity<AccountResponse<List<TransactionDto>>> transfer(
+            @RequestHeader(value = "X-Transaction-Pin", required = false) String pin,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody TransferRequest request
     ) {
+        // You may only send money out of your own account; any active account can receive.
+        accountService.requireOwnedBy(currentUser.id(), request.fromAccountId());
+        pinService.verify(currentUser.id(), pin);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(accountService.transfer(request));
+                .body(transferService.transfer(currentUser.id(), idempotencyKey, request));
+    }
+
+    @GetMapping("/lookup/{accountNumber}")
+    public ResponseEntity<AccountServ.AccountLookup> lookup(@PathVariable String accountNumber) {
+        return ResponseEntity.ok(accountService.lookupByAccountNumber(accountNumber));
+    }
+
+    @PostMapping("/transfer/by-number")
+    public ResponseEntity<AccountResponse<List<TransactionDto>>> transferByNumber(
+            @RequestHeader(value = "X-Transaction-Pin", required = false) String pin,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody dan.bank.bank.Account.dtos.TransferByNumberRequest request
+    ) {
+        accountService.requireOwnedBy(currentUser.id(), request.fromAccountId());
+        pinService.verify(currentUser.id(), pin);
+        long toAccountId = accountService.lookupByAccountNumber(request.toAccountNumber()).accountId();
+        return ResponseEntity.status(HttpStatus.CREATED).body(transferService.transfer(currentUser.id(), idempotencyKey,
+                new TransferRequest(request.fromAccountId(), toAccountId, request.amount(), request.description())));
     }
 
     @PutMapping("/{accountId}/user/{userId}")
@@ -90,6 +126,7 @@ public class AccountController {
             @PathVariable long userId,
             @Valid @RequestBody AccountUpdate request
     ) {
+        currentUser.requireSelf(userId);
         return ResponseEntity.ok(accountService.updateAccount(accountId, userId, request));
     }
 
@@ -98,6 +135,7 @@ public class AccountController {
             @PathVariable long accountId,
             @PathVariable long userId
     ) {
+        currentUser.requireSelf(userId);
         return ResponseEntity.ok(accountService.deActivateAccount(userId, accountId));
     }
 
@@ -106,6 +144,7 @@ public class AccountController {
             @PathVariable long accountId,
             @PathVariable long userId
     ) {
+        currentUser.requireSelf(userId);
         return ResponseEntity.ok(accountService.deleteAccount(userId, accountId));
     }
 }

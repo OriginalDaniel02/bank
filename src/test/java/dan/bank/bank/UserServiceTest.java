@@ -281,7 +281,7 @@ public class UserServiceTest {
 
         assertEquals(user.getEmail(), userDetails.getUsername());
         assertEquals(user.getPassword(), userDetails.getPassword());
-        assertFalse(userDetails.getAuthorities().iterator().hasNext());
+        assertEquals("ROLE_USER", userDetails.getAuthorities().iterator().next().getAuthority());
     }
 
     @Test
