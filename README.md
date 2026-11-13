@@ -12,6 +12,7 @@ Built with Spring Boot, PostgreSQL and Flyway.
 - [Configuration](#configuration)
 - [API Overview](#api-overview)
 - [Security Model](#security-model)
+- [KYC and Face Verification](#kyc-and-face-verification)
 - [How Transfers Work](#how-transfers-work)
 - [Project Structure](#project-structure)
 - [Testing](#testing)
@@ -25,6 +26,7 @@ Built with Spring Boot, PostgreSQL and Flyway.
 - 4-digit transaction PIN with lockout after repeated wrong attempts
 - Idempotent transfers via an `Idempotency-Key` header, so a retry never moves money twice
 - Per-transfer and daily limits, and tiered transfer fees credited to an income account
+- KYC with face verification (pluggable provider) and tier-based limits: unverified users get stricter limits
 - Paged transaction history
 - Roles (`USER`, `ADMIN`); only admins can credit or debit accounts directly
 - Ownership checks: users can only access their own data
@@ -106,8 +108,9 @@ All settings come from environment variables (see `src/main/resources/applicatio
 | `JWT_SECRET` | Yes | Base64-encoded signing key, at least 32 bytes |
 | `ADMIN_EMAIL` | No | Sign up first, then set this to promote that user to `ADMIN` at startup |
 | `FEE_INCOME_ACCOUNT` | No | Account number that receives transfer fees. **Fees are only charged when this is set.** |
+| `kyc.face.provider` | No | Face-verification provider. Unset by default (the KYC endpoint returns 503). `stub` is for local development only. |
 
-Limits and fee tiers live in `application.properties` (`bank.limits.*`, `bank.fees.*`). The default values are placeholders. Set real ones before going live.
+Limits and fee tiers live in `application.properties` (`bank.limits.*`, `bank.fees.*`). Unverified users use the stricter `bank.limits.tier0-*` values. The default values are placeholders. Set real ones before going live.
 
 ## API Overview
 
@@ -150,6 +153,13 @@ All endpoints are under `/api/v1`. Everything except sign-up, `/auth/**` and the
 | POST | `/accounts/{id}/credit` | **Admin only.** Add funds |
 | POST | `/accounts/{id}/debit` | **Admin only.** Remove funds |
 
+### KYC
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/kyc/face` | Upload a selfie (`multipart/form-data`, field `selfie`, JPEG or PNG, max 5 MB) |
+| GET | `/kyc/status` | Your KYC tier and the latest face-check result |
+
 ### Example: a transfer
 
 ```bash
@@ -168,12 +178,14 @@ Amounts must be at least `0.01` and have at most 2 decimal places.
 | Code | Meaning |
 |---|---|
 | 400 | Validation error, or no PIN set yet |
+| 413 / 415 | Selfie too large, or not a JPEG/PNG |
 | 401 | Missing or invalid token |
 | 403 | Not your resource, wrong PIN, or admin required |
 | 404 | Not found (also returned for other people's accounts) |
 | 409 | Conflict: insufficient funds, inactive account, duplicate data |
 | 422 | Limit exceeded, or `Idempotency-Key` reused with a different request |
 | 423 | Transaction PIN locked after 5 wrong attempts (15 minutes) |
+| 503 | Face verification is not configured |
 
 ## Security Model
 
@@ -184,12 +196,23 @@ Amounts must be at least `0.01` and have at most 2 decimal places.
 - Direct credit and debit are admin-only.
 - CSRF is disabled because the API is stateless and token-based.
 
+## KYC and Face Verification
+
+Users start at **tier 0** (unverified) with stricter transfer limits. A successful face check moves them to **tier 1**, which uses the standard limits.
+
+- Face checks go through the `FaceVerificationProvider` interface (`src/main/java/dan/bank/bank/Kyc`). A real vendor adapter (for example Smile ID, Youverify, Dojah or AWS Rekognition) implements it, so the app doesn't depend on one vendor.
+- **Only the verdict is stored** (status, provider name and reference). Selfie images are never saved or logged.
+- Uploads are accepted only if the file really is a JPEG or PNG (checked by its first bytes, not the client-supplied type).
+- **No real provider is bundled.** With `kyc.face.provider` unset, `POST /kyc/face` returns 503. `kyc.face.provider=stub` approves any image **without checking a face** and must never be enabled in production.
+- Real liveness detection (to resist photo spoofing) has to come from the vendor's SDK in the client app.
+
 ## How Transfers Work
 
 1. The caller must own the source account and supply the correct PIN.
-2. The per-transfer limit is checked, then the fee is calculated.
-3. The source, destination and fee accounts are locked in ascending id order, which prevents deadlocks.
-4. The daily limit is checked, then the balance must cover the amount plus the fee.
+2. The fee is calculated, and the accounts are locked.
+   The source, destination and fee accounts are locked in ascending id order, which prevents deadlocks.
+3. The per-transfer and daily limits for the sender's KYC tier are checked.
+4. The balance must cover the amount plus the fee.
 5. Balances update and ledger rows are written in one database transaction:
    `TRANSFER_OUT`, `TRANSFER_IN`, and, if a fee applies, two `FEE` rows. Every row has its own unique reference sharing a transfer-id prefix.
 6. If an `Idempotency-Key` was sent, the result is stored against it, so a retry returns the original result.
@@ -200,10 +223,11 @@ Amounts must be at least `0.01` and have at most 2 decimal places.
 src/main/java/dan/bank/bank
 ├── Account/   accounts, transactions, transfers, limits and fees, idempotency
 ├── Auth/      JWT filter, token service, refresh tokens, current-user helper
+├── Kyc/       face verification port, KYC tiers, selfie upload
 ├── User/      users, roles, transaction PIN
 ├── SecurityConfig.java
 └── ApiExceptionHandler.java
-src/main/resources/db/migration   Flyway migrations (V1 to V4)
+src/main/resources/db/migration   Flyway migrations (V1 to V5)
 src/test                          unit and integration tests (H2)
 ```
 
@@ -217,7 +241,7 @@ Tests run against an in-memory H2 database in PostgreSQL mode, with the real Fly
 
 ## Roadmap
 
-- KYC with facial verification and tiered limits (via a provider such as Smile ID, Youverify or Dojah)
+- A real face-verification adapter (Smile ID, Youverify or Dojah) and ID-document checks for higher KYC tiers
 - Payment provider integration for deposits and withdrawals (Paystack or Flutterwave)
 - Beneficiaries, statements (PDF/CSV) and notifications
 - Bill payments (airtime, data, electricity)
