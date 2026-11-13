@@ -1,13 +1,12 @@
 package dan.bank.bank;
 
-import dan.bank.bank.User.dto.LoginRequest;
-import dan.bank.bank.User.dto.UpdateRequest;
-import dan.bank.bank.User.dto.UserDto;
-import dan.bank.bank.User.dto.UserRequest;
-import dan.bank.bank.User.dto.UserResponse;
-import dan.bank.bank.User.model.User;
-import dan.bank.bank.User.repository.UserRepository;
-import dan.bank.bank.User.service.UserService;
+import dan.bank.bank.user.dto.UpdateRequest;
+import dan.bank.bank.user.dto.UserDto;
+import dan.bank.bank.user.dto.UserRequest;
+import dan.bank.bank.user.dto.UserResponse;
+import dan.bank.bank.user.model.User;
+import dan.bank.bank.user.repository.UserRepository;
+import dan.bank.bank.user.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,7 +18,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -94,43 +92,6 @@ public class UserServiceTest {
         verify(userRepo, never()).save(any(User.class));
     }
 
-    // ---------- loginUser ----------
-
-    @Test
-    void loginUser_returnsUser_whenCredentialsAreValid() {
-        User user = createUser();
-        LoginRequest request = new LoginRequest(user.getEmail(), "raw-password");
-        when(userRepo.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
-        when(passwordEncoder.matches("raw-password", user.getPassword())).thenReturn(true);
-
-        UserResponse<UserDto> response = userService.loginUser(request);
-
-        assertEquals("Login verified", response.message());
-        assertEquals(user.getEmail(), response.data().email());
-    }
-
-    @Test
-    void loginUser_throwsUnauthorized_whenUserNotFound() {
-        LoginRequest request = new LoginRequest("missing@example.com", "raw-password");
-        when(userRepo.findByEmail(request.email())).thenReturn(Optional.empty());
-
-        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> userService.loginUser(request));
-
-        assertEquals(401, ex.getStatusCode().value());
-    }
-
-    @Test
-    void loginUser_throwsUnauthorized_whenPasswordDoesNotMatch() {
-        User user = createUser();
-        LoginRequest request = new LoginRequest(user.getEmail(), "wrong-password");
-        when(userRepo.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
-        when(passwordEncoder.matches("wrong-password", user.getPassword())).thenReturn(false);
-
-        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> userService.loginUser(request));
-
-        assertEquals(401, ex.getStatusCode().value());
-    }
-
     // ---------- getUserById ----------
 
     @Test
@@ -152,19 +113,6 @@ public class UserServiceTest {
         ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> userService.getUserById(1L));
 
         assertEquals(404, ex.getStatusCode().value());
-    }
-
-    // ---------- getAllUsers ----------
-
-    @Test
-    void getAllUsers_returnsAllUsersMappedToDto() {
-        List<User> allUsers = List.of(createUser(), createUser(), createUser());
-        when(userRepo.findAll()).thenReturn(allUsers);
-
-        UserResponse<List<UserDto>> response = userService.getAllUsers();
-
-        assertEquals("Users found", response.message());
-        assertEquals(allUsers.size(), response.data().size());
     }
 
     // ---------- getUserByEMail ----------
