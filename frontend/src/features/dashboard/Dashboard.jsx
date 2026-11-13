@@ -17,7 +17,8 @@ import StatementsCenter from "../statements/StatementsCenter.jsx";
 import ScheduledPayments from "../scheduled/ScheduledPayments.jsx";
 import AccountManagement from "../accounts/AccountManagement.jsx";
 import FinancialInsights from "../insights/FinancialInsights.jsx";
-import { dashboardApi, notificationsApi } from "../../services/api.js";
+import { dashboardApi, depositsApi, notificationsApi } from "../../services/api.js";
+import { PENDING_DEPOSIT_KEY } from "../funding/AddMoneyFlow.jsx";
 
 const demoAccounts = [{id:"primary",kind:"savings",type:"Savings",name:"Personal Savings",number:"0123456789",balance:2580420.75,opened:"14 Mar 2024"},{id:"current",kind:"current",type:"Current",name:"Everyday Account",number:"0129874321",balance:742850.2,opened:"02 Jan 2026"}];
 const emptyAccount = {id:"",kind:"savings",type:"Savings",name:"Account unavailable",number:"----------",balance:0,opened:""};
@@ -83,6 +84,25 @@ export default function Dashboard({ user, onSignOut }) {
   };
   const loadDashboard = async accountId => {setDashboardLoading(true);try{applyDashboard(await dashboardApi.get(accountId))}catch(error){setToast(error.status===401?"Your session has expired. Please sign in again.":error.message)}finally{setDashboardLoading(false)}};
   useEffect(()=>{if(!user.demo){loadDashboard();refreshUnread()}},[user.demo]);
+  // Coming back from Paystack: the page reloaded, so confirm the payment we started and tell the person what happened.
+  useEffect(()=>{
+    if(user.demo)return;
+    const params=new URLSearchParams(window.location.search);
+    const reference=params.get("reference")||sessionStorage.getItem(PENDING_DEPOSIT_KEY);
+    if(!reference)return;
+    sessionStorage.removeItem(PENDING_DEPOSIT_KEY);
+    if(params.has("reference")||params.has("trxref"))window.history.replaceState({},"",window.location.pathname);
+    const check=async attempt=>{
+      try{
+        const deposit=await depositsApi.status(reference);
+        if(deposit.status==="SUCCESS"){showToast(`${currency.format(deposit.amount)} was added to your account.`);loadDashboard(deposit.accountId);refreshUnread()}
+        else if(deposit.status==="FAILED")showToast("Your payment was not completed. You have not been charged.");
+        else if(attempt<5)setTimeout(()=>check(attempt+1),3000);
+        else showToast("Your payment is still being confirmed. We’ll notify you as soon as it arrives.");
+      }catch{/* not ours, or signed in as someone else: nothing to report */}
+    };
+    check(0);
+  },[user.demo]);
   const selectAccount = accountId => {setSelectedAccountId(accountId);if(!user.demo)loadDashboard(accountId)};
 
   return <div className="bank-shell">
@@ -102,7 +122,7 @@ export default function Dashboard({ user, onSignOut }) {
     {historyOpen && <TransactionHistory account={selectedAccount} onClose={() => setHistoryOpen(false)} onStatements={() => {setHistoryOpen(false);openLive("Statements",setStatementsOpen)}}/>} 
     {cardsOpen && <CardManagement user={user} onClose={() => setCardsOpen(false)}/>} 
     {utilityMode && <BillPaymentFlow initialMode={utilityMode} onClose={() => setUtilityMode(null)} onComplete={() => {setToast("Payment completed successfully.");setTimeout(()=>setToast(""),3500)}}/>}
-    {fundingOpen && <AddMoneyFlow account={selectedAccount} onClose={() => setFundingOpen(false)}/>}
+    {fundingOpen && <AddMoneyFlow account={selectedAccount} kycTier={kycTier} onVerify={() => setVerificationOpen(true)} onClose={() => setFundingOpen(false)}/>}
     {beneficiariesOpen && <BeneficiaryManagement onClose={() => setBeneficiariesOpen(false)} onSendMoney={() => openLive("Transfers",setTransferOpen)}/>} 
     {notificationsOpen && <NotificationCenter onClose={() => setNotificationsOpen(false)} onChanged={refreshUnread}/>} 
     {securityOpen && <ProfileSecurity user={user} kycTier={kycTier} pinSet={pinSet} onPinSet={() => setPinSet(true)} onVerify={() => setVerificationOpen(true)} onClose={() => setSecurityOpen(false)} onSignOut={onSignOut}/>} 

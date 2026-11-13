@@ -137,12 +137,18 @@ public class AccountService {
 
     @Transactional
     public AccountResponse<TransactionDto> credit(long accountId, MoneyRequest request) {
+        return credit(accountId, request, UUID.randomUUID().toString());
+    }
+
+    /** Credits with a caller-chosen ledger reference (unique), e.g. so a deposit can never be credited twice. */
+    @Transactional
+    public AccountResponse<TransactionDto> credit(long accountId, MoneyRequest request, String reference) {
         Account account = findActiveAccountWithLock(accountId);
         BigDecimal amount = normalizeMoney(request.amount());
         account.setBalance(account.getBalance().add(amount));
 
         TransactionDto transaction = recordTransaction(
-                account, TransactionType.CREDIT, amount, request.description()
+                account, TransactionType.CREDIT, amount, request.description(), reference
         );
         return new AccountResponse<>("Account credited", transaction);
     }

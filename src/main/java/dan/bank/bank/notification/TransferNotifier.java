@@ -60,6 +60,17 @@ public class TransferNotifier {
         }
     }
 
+    public void depositCompleted(long accountId, BigDecimal amount) {
+        try {
+            AccountParty account = accountRepository.findPartyById(accountId).orElse(null);
+            if (account == null) return;
+            send(account.getUserId(), NotificationType.CREDIT, "Deposit successful",
+                    money(amount) + " was added to " + mask(account.getAccountNumber()) + " by card");
+        } catch (RuntimeException e) {
+            log.warn("Could not create deposit notification", e);
+        }
+    }
+
     /** One failed notification must not stop the other. */
     private void send(Long userId, NotificationType type, String title, String message) {
         try {
