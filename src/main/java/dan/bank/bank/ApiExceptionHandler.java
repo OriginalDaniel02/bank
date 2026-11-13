@@ -44,6 +44,17 @@ public class ApiExceptionHandler {
         return ResponseEntity.badRequest().body(new ApiError(message, "VALIDATION_ERROR", fields));
     }
 
+    @ExceptionHandler(jakarta.validation.ConstraintViolationException.class)
+    public ResponseEntity<ApiError> handleConstraint(jakarta.validation.ConstraintViolationException exception) {
+        Map<String, String> fields = new LinkedHashMap<>();
+        exception.getConstraintViolations().forEach(v -> {
+            String path = v.getPropertyPath().toString();
+            fields.putIfAbsent(path.substring(path.lastIndexOf('.') + 1), v.getMessage());
+        });
+        String message = fields.values().stream().findFirst().orElse("Please check the details you entered");
+        return ResponseEntity.badRequest().body(new ApiError(message, "VALIDATION_ERROR", fields));
+    }
+
     @ExceptionHandler({HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class})
     public ResponseEntity<ApiError> handleMalformed(Exception exception) {
         return ResponseEntity.badRequest().body(ApiError.of(HttpStatus.BAD_REQUEST, "The request could not be understood"));
