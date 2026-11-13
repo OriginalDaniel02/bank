@@ -53,7 +53,7 @@ export default function NotificationCenter({ onClose, onChanged }) {
     <button className="notifications-backdrop" onClick={onClose} />
     <section className="notifications-window">
       <header className="notifications-header"><div><span>INBOX</span><h2>Notifications {unread > 0 && <b>{unread}</b>}</h2><p>Important activity and updates from DanBank.</p></div><div><button onClick={onClose}>×</button></div></header>
-      <div className="notification-tools"><div>{["All", "Unread", "Payments", "Account"].map(name => <button key={name} className={filter === name ? "active" : ""} onClick={() => setFilter(name)}>{name}</button>)}</div>{unread > 0 && <button onClick={markAll}>✓ Mark all as read</button>}</div>
+      <div className="notification-tools"><div>{["All", "Unread", "Payments", "Security", "Account"].map(name => <button key={name} className={filter === name ? "active" : ""} onClick={() => setFilter(name)}>{name}</button>)}</div>{unread > 0 && <button onClick={markAll}>✓ Mark all as read</button>}</div>
       <div className="notification-list">
         {visible.map(item => <button key={item.id} className={item.unread ? "unread" : ""} onClick={() => open(item)}><span className={`notification-icon ${item.tone}`}><Icon name={item.icon} size={18} /></span><span className="notification-copy"><strong>{item.title}{item.unread && <i />}</strong><p>{item.message}</p><small>{item.time}</small></span><Icon name="chevron" size={16} /></button>)}
         {loading && <div className="notifications-empty"><p>Loading your notifications…</p></div>}

@@ -12,6 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Component
 public class AdminBootstrap implements ApplicationRunner {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AdminBootstrap.class);
+
     private final UserRepository userRepository;
     private final String adminEmail;
 
@@ -24,6 +26,9 @@ public class AdminBootstrap implements ApplicationRunner {
     @Transactional
     public void run(ApplicationArguments args) {
         if (adminEmail.isBlank()) return;
-        userRepository.findByEmail(adminEmail).ifPresent(user -> user.setRole(Role.ADMIN));
+        userRepository.findByEmail(adminEmail).ifPresentOrElse(user -> {
+            if (user.getRole() != Role.ADMIN) log.info("Promoted the account for ADMIN_EMAIL to ADMIN");
+            user.setRole(Role.ADMIN);
+        }, () -> log.warn("ADMIN_EMAIL is set but no user has signed up with that email yet. Sign up, then restart."));
     }
 }

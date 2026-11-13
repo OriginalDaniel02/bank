@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import Icon from "../../components/Icon.jsx";
-import { accountsApi, securityApi } from "../../services/api.js";
+import { accountsApi, devicesApi, securityApi } from "../../services/api.js";
 
 const money = new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN", maximumFractionDigits: 0 });
 
@@ -18,7 +18,7 @@ export default function ProfileSecurity({ user, kycTier, pinSet, onPinSet, onClo
     <section className="security-window">
       <aside className="security-nav">
         <div className="profile-summary"><span>{initials}</span><strong>{user.firstName} {user.lastName}</strong><small>Personal account</small><em>{verified ? "Identity verified" : "Not yet verified"}</em></div>
-        <nav>{[["Profile", "home"], ["Security", "settings"], ["Limits", "chart"]].map(([name, icon]) =>
+        <nav>{[["Profile", "home"], ["Security", "settings"], ["Devices", "phone"], ["Limits", "chart"]].map(([name, icon]) =>
           <button key={name} className={section === name ? "active" : ""} onClick={() => setSection(name)}><Icon name={icon} size={18} />{name}<Icon name="chevron" size={14} /></button>)}</nav>
         <button className="security-signout" onClick={onSignOut}>Sign out of DanBank</button>
       </aside>
@@ -31,6 +31,7 @@ export default function ProfileSecurity({ user, kycTier, pinSet, onPinSet, onClo
           <SettingRow icon="settings" title="Password" text="Change it any time. Other devices are signed out" action="Change" onClick={() => setPasswordDialog(true)} />
           <div className="security-health"><div><span>{pinSet ? "✓" : "!"}</span><p><strong>{pinSet ? "Transaction PIN is active" : "Set up your transaction PIN"}</strong>{pinSet ? "Every payment needs your PIN. Five wrong attempts lock it for 15 minutes." : "Without a PIN you cannot send money."}</p></div><b>{pinSet ? "100%" : "50%"}</b></div>
         </section>}
+        {section === "Devices" && <DevicesPanel notify={notify} />}
         {section === "Limits" && <LimitsPanel verified={verified} onVerify={() => { onClose(); onVerify?.(); }} />}
       </main>
       {notice && <button className="security-notice" onClick={() => setNotice("")}>✓ {notice}<span>×</span></button>}
@@ -148,4 +149,29 @@ function PasswordDialog({ onClose, onSaved }) {
       <div><button type="button" onClick={onClose}>Cancel</button><button type="submit" disabled={saving}>{saving ? "Saving…" : "Save securely"}</button></div>
     </form>
   </div>;
+}
+
+function DevicesPanel({ notify }) {
+  const [devices, setDevices] = useState(null);
+  const [error, setError] = useState("");
+  const load = () => devicesApi.list().then(setDevices).catch(requestError => setError(requestError.message));
+  useEffect(() => { load(); }, []);
+
+  const remove = async device => {
+    try { await devicesApi.remove(device.id); notify(`${device.label} was removed and signed out.`); load(); }
+    catch (requestError) { setError(requestError.message); }
+  };
+  const when = value => new Date(value).toLocaleString("en-NG", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+
+  return <section className="settings-panel">
+    <div className="settings-intro"><h3>Trusted devices</h3><p>These devices can sign in to your account. A new device must pass a face check first.</p></div>
+    {error && <p className="payment-error">{error}</p>}
+    {!devices && !error && <p className="payment-hint">Loading your devices…</p>}
+    {devices && <div className="device-list">{devices.map(device => <article key={device.id}>
+      <span><Icon name="phone" size={19} /></span>
+      <div><strong>{device.label}{device.current && <i>THIS DEVICE</i>}</strong><small>Added {when(device.createdAt)} · Last active {when(device.lastUsedAt)}</small></div>
+      {!device.current && <button onClick={() => remove(device)}>Remove</button>}
+    </article>)}</div>}
+    <div className="device-warning"><span>!</span><p><strong>Don’t recognize a device?</strong>Remove it, then change your password in the Security tab.</p></div>
+  </section>;
 }

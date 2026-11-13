@@ -33,6 +33,9 @@ public class RefreshToken {
     @Column(nullable = false)
     private boolean revoked;
 
+    /** The trusted device this session was issued to (null for sessions that predate device tracking). */
+    private Long deviceId;
+
     public RefreshToken(String tokenHash, User user, Instant expiresAt) {
         this.tokenHash = tokenHash;
         this.user = user;

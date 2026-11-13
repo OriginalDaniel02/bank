@@ -90,9 +90,31 @@ const query = params => {
 };
 
 // ---- public ---------------------------------------------------------------------------------
+// The secret for this browser's "trusted device" status. It is not a login: it only tells the bank this browser was
+// verified before. Kept in localStorage so it survives closing the tab.
+const DEVICE_KEY = "danbank.deviceToken";
+export const deviceToken = {
+  get: () => { try { return localStorage.getItem(DEVICE_KEY) || ""; } catch { return ""; } },
+  set: value => { try { localStorage.setItem(DEVICE_KEY, value); } catch { /* storage blocked: next sign-in will just ask again */ } },
+  clear: () => { try { localStorage.removeItem(DEVICE_KEY); } catch { /* nothing to do */ } },
+};
+const deviceHeader = () => (deviceToken.get() ? { "X-Device-Token": deviceToken.get() } : {});
+const remember = result => { if (result?.deviceToken) deviceToken.set(result.deviceToken); return result; };
+
+/** Face images go up as multipart: one "selfie" and any number of "liveness" frames. */
+const faceForm = ({ selfie, liveness = [] }, extra = {}) => {
+  const form = new FormData();
+  Object.entries(extra).forEach(([name, value]) => form.append(name, value));
+  form.append("selfie", selfie, "selfie.jpg");
+  liveness.forEach((frame, index) => form.append("liveness", frame, `frame-${index}.jpg`));
+  return form;
+};
+
 export const authApi = {
   signup: payload => send("/auth/signup", json("POST", payload)).then(parse),
-  login: (identifier, password) => send("/auth/login", json("POST", { identifier, password })).then(parse),
+  /** May return { status: "DEVICE_VERIFICATION_REQUIRED", challengeToken } instead of tokens: a new phone must verify its face. */
+  login: (identifier, password) => send("/auth/login", { ...json("POST", { identifier, password }), headers: deviceHeader() }).then(parse).then(remember),
+  verifyDevice: (challengeToken, faces) => send("/auth/device/verify", { method: "POST", body: faceForm(faces, { challengeToken }) }).then(parse).then(remember),
   logout: () => (tokens?.refreshToken
     ? send("/auth/logout", json("POST", { refreshToken: tokens.refreshToken })).then(() => null).catch(() => null)
     : Promise.resolve(null)),
@@ -144,6 +166,11 @@ export const insightsApi = {
   get: accountId => request(`/insights${query({ accountId })}`),
 };
 
+export const devicesApi = {
+  list: () => request("/devices", { headers: deviceHeader() }),
+  remove: id => request(`/devices/${id}`, { method: "DELETE" }),
+};
+
 export const beneficiariesApi = {
   list: () => request("/beneficiaries"),
   add: (accountNumber, nickname) => request("/beneficiaries", json("POST", { accountNumber, nickname })),
@@ -160,7 +187,7 @@ export const notificationsApi = {
 export const securityApi = {
   /** Returns a fresh token pair: every other device is signed out, this one stays signed in. */
   changePassword: async (currentPassword, newPassword) => {
-    const result = await request("/users/me/password", json("POST", { currentPassword, newPassword }));
+    const result = await request("/users/me/password", { ...json("POST", { currentPassword, newPassword }), headers: deviceHeader() });
     tokens = { accessToken: result.accessToken, refreshToken: result.refreshToken };
     return result;
   },
@@ -170,11 +197,7 @@ export const securityApi = {
 
 export const kycApi = {
   status: () => request("/kyc/status"),
-  verifyFace: file => {
-    const form = new FormData();
-    form.append("selfie", file);
-    return request("/kyc/face", { method: "POST", body: form });
-  },
+  verifyFace: faces => request("/kyc/face", { method: "POST", body: faceForm(faces) }),
 };
 
 export const newIdempotencyKey = () => crypto.randomUUID();

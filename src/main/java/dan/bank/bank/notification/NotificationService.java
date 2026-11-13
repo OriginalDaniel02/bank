@@ -28,6 +28,12 @@ public class NotificationService {
         repository.save(new Notification(userId, type, title, message));
     }
 
+    /** Saved in its own transaction, so a failure here can never undo or fail the sign-in that triggered it. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public void notifyIndependently(long userId, NotificationType type, String title, String message) {
+        repository.save(new Notification(userId, type, title, message));
+    }
+
     @Transactional(readOnly = true)
     public PageResponse<NotificationDto> list(long userId, Boolean unreadOnly, int page, int size) {
         PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE));
