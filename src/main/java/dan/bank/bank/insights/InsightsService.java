@@ -1,6 +1,7 @@
 package dan.bank.bank.insights;
 
 import dan.bank.bank.account.model.Account;
+import dan.bank.bank.account.model.AccountStatus;
 import dan.bank.bank.account.model.AccountTransaction;
 import dan.bank.bank.account.model.TransactionType;
 import dan.bank.bank.account.repository.AccountRepository;
@@ -77,7 +78,7 @@ public class InsightsService {
             return accounts.findByIdAndUser_Id(accountId, userId)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Account not found"));
         }
-        return accounts.findByUser_Id(userId).stream().min(Comparator.comparingLong(Account::getId)).orElse(null);
+        return accounts.findByUser_IdAndStatusNot(userId, AccountStatus.CLOSED).stream().min(Comparator.comparingLong(Account::getId)).orElse(null);
     }
 
     private Map<TransactionType, BigDecimal> totals(Long accountId, YearMonth month) {

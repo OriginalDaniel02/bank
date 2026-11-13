@@ -1,6 +1,7 @@
 package dan.bank.bank.dashboard;
 
 import dan.bank.bank.account.model.Account;
+import dan.bank.bank.account.model.AccountStatus;
 import dan.bank.bank.account.model.AccountTransaction;
 import dan.bank.bank.account.model.TransactionType;
 import dan.bank.bank.account.repository.AccountRepository;
@@ -41,7 +42,7 @@ public class DashboardService {
 
     @Transactional(readOnly = true)
     public DashboardView dashboard(long userId, Long requestedAccountId) {
-        List<Account> accounts = accountRepository.findByUser_Id(userId).stream()
+        List<Account> accounts = accountRepository.findByUser_IdAndStatusNot(userId, AccountStatus.CLOSED).stream()
                 .sorted((a, b) -> Long.compare(a.getId(), b.getId())).toList();
         List<AccountView> accountViews = accounts.stream().map(DashboardService::toView).toList();
 

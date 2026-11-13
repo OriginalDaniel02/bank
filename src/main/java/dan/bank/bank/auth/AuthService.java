@@ -36,12 +36,14 @@ public class AuthService {
     private final long refreshTokenDays;
     private final UserService userService;
     private final AccountService accountService;
+    private final LoginThrottle loginThrottle;
+    private final String unknownUserHash;
 
     public AuthService(
             UserRepository userRepository, RefreshTokenRepository refreshTokenRepository,
                        PasswordEncoder passwordEncoder, TokenService tokenService,
                        @Value("${jwt.refresh-token-days}") long refreshTokenDays,
-                       UserService userService, AccountService accountService) {
+                       UserService userService, AccountService accountService, LoginThrottle loginThrottle) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
@@ -49,18 +51,26 @@ public class AuthService {
         this.refreshTokenDays = refreshTokenDays;
         this.userService = userService;
         this.accountService = accountService;
+        this.loginThrottle = loginThrottle;
+        this.unknownUserHash = passwordEncoder.encode(UUID.randomUUID().toString());
     }
 
     @Transactional
     public AuthResponse login(LoginRequest request) {
         String identifier = request.identifier().strip();
+        loginThrottle.check(identifier);
         User user = (identifier.contains("@")
                 ? userRepository.findByEmail(identifier)
                 : userRepository.findByPhoneNumber(identifier.replaceAll("\\s", "")))
-                .orElseThrow(this::invalidCredentials);
-        if (!passwordEncoder.matches(request.password(), user.getPassword())) {
+                .orElse(null);
+        // Always do one password check, even for an unknown identifier, so the response time does not reveal
+        // whether an account exists.
+        boolean passwordMatches = passwordEncoder.matches(request.password(), user != null ? user.getPassword() : unknownUserHash);
+        if (user == null || !passwordMatches) {
+            loginThrottle.recordFailure(identifier);
             throw invalidCredentials();
         }
+        loginThrottle.clear(identifier);
         return createTokenPair(user);
     }
 

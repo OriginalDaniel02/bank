@@ -1,5 +1,6 @@
 package dan.bank.bank.account.repository;
 import dan.bank.bank.account.model.Account;
+import dan.bank.bank.account.model.AccountStatus;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -13,6 +14,8 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     Optional<Account> findByIdAndUser_Id(Long accountId, Long userId);
 
     List<Account> findByUser_Id(Long userId);
+
+    List<Account> findByUser_IdAndStatusNot(Long userId, AccountStatus status);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<Account> findWithLockById(Long accountId);
