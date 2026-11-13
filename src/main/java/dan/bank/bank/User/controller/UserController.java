@@ -30,6 +30,7 @@ public class UserController {
 
     private final UserService userService;
     private final CurrentUser currentUser;
+    private final dan.bank.bank.User.service.PinService pinService;
 
 
     @GetMapping
@@ -61,6 +62,12 @@ public class UserController {
         return ResponseEntity.status(HttpStatus.CREATED).body(userService.signUp(user));
     }
 
+
+    @PostMapping("/me/pin")
+    public ResponseEntity<Void> setPin(@Valid @RequestBody dan.bank.bank.User.dto.SetPinRequest request) {
+        pinService.setPin(currentUser.id(), request.pin(), request.password());
+        return ResponseEntity.noContent().build();
+    }
 
     @PutMapping("/updateUser/{id}")
     public ResponseEntity<UserResponse<UserDto>> updateUser(

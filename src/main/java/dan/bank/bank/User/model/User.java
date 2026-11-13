@@ -34,6 +34,19 @@ public class User {
     @Column(nullable = false)
     private String password;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    @Builder.Default
+    private Role role = Role.USER;
+
+    /** BCrypt hash of the 4-digit transaction PIN; null until the user sets one. */
+    private String transactionPinHash;
+
+    @Column(nullable = false)
+    private int pinFailedAttempts;
+
+    private Instant pinLockedUntil;
+
     private String address;
 
     private LocalDate dateOfBirth;
