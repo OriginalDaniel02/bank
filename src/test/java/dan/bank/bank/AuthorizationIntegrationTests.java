@@ -1,13 +1,13 @@
 package dan.bank.bank;
 
-import dan.bank.bank.Account.dtos.MoneyRequest;
-import dan.bank.bank.Account.repository.AccountRepo;
-import dan.bank.bank.Account.repository.AccountTransactionRepository;
-import dan.bank.bank.Account.service.AccountServ;
-import dan.bank.bank.Auth.TokenService;
-import dan.bank.bank.Auth.repository.RefreshTokenRepository;
-import dan.bank.bank.User.model.User;
-import dan.bank.bank.User.repository.UserRepository;
+import dan.bank.bank.account.dto.MoneyRequest;
+import dan.bank.bank.account.repository.AccountRepository;
+import dan.bank.bank.account.repository.AccountTransactionRepository;
+import dan.bank.bank.account.service.AccountService;
+import dan.bank.bank.auth.TokenService;
+import dan.bank.bank.auth.repository.RefreshTokenRepository;
+import dan.bank.bank.user.model.User;
+import dan.bank.bank.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,10 +30,10 @@ class AuthorizationIntegrationTests {
     @Autowired MockMvc mvc;
     @Autowired TokenService tokenService;
     @Autowired UserRepository userRepository;
-    @Autowired AccountRepo accountRepository;
+    @Autowired AccountRepository accountRepository;
     @Autowired AccountTransactionRepository transactionRepository;
     @Autowired RefreshTokenRepository refreshTokenRepository;
-    @Autowired AccountServ accountService;
+    @Autowired AccountService accountService;
     @Autowired org.springframework.security.crypto.password.PasswordEncoder encoder;
 
     private User alice;
@@ -163,7 +163,7 @@ class AuthorizationIntegrationTests {
 
     @Test
     void onlyAdminCanCredit() throws Exception {
-        alice.setRole(dan.bank.bank.User.model.Role.ADMIN);
+        alice.setRole(dan.bank.bank.user.model.Role.ADMIN);
         userRepository.save(alice);
         mvc.perform(post("/api/v1/accounts/" + bobAccount + "/credit").header("Authorization", bearer(alice))
                 .contentType(MediaType.APPLICATION_JSON).content("{\"amount\":20.00}")).andExpect(status().isCreated());

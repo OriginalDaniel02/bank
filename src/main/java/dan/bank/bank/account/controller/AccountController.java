@@ -1,0 +1,159 @@
+package dan.bank.bank.account.controller;
+
+import dan.bank.bank.account.dto.AccountDto;
+import dan.bank.bank.account.dto.AccountResponse;
+import dan.bank.bank.account.dto.AccountUpdate;
+import dan.bank.bank.account.dto.MoneyRequest;
+import dan.bank.bank.account.dto.PageResponse;
+import dan.bank.bank.account.dto.TransactionDto;
+import dan.bank.bank.account.dto.TransferRequest;
+import dan.bank.bank.account.service.AccountService;
+import dan.bank.bank.auth.CurrentUser;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
+import dan.bank.bank.account.dto.TransferByNumberRequest;
+import dan.bank.bank.account.service.IdempotentTransferService;
+import dan.bank.bank.notification.TransferNotifier;
+import dan.bank.bank.user.service.PinService;
+import org.springframework.security.access.prepost.PreAuthorize;
+
+@RestController
+@RequestMapping("/api/v1/accounts")
+public class AccountController {
+
+    private final AccountService accountService;
+    private final CurrentUser currentUser;
+    private final PinService pinService;
+    private final IdempotentTransferService transferService;
+    private final TransferNotifier notifier;
+
+    public AccountController(AccountService accountService, CurrentUser currentUser, PinService pinService, IdempotentTransferService transferService, TransferNotifier notifier) {
+        this.accountService = accountService;
+        this.currentUser = currentUser;
+        this.pinService = pinService;
+        this.transferService = transferService;
+        this.notifier = notifier;
+    }
+
+    @GetMapping
+    public ResponseEntity<AccountResponse<List<AccountDto>>> getAllAccounts() {
+        return ResponseEntity.ok(accountService.getAccountsForUser(currentUser.id()));
+    }
+
+    @GetMapping("/{accountId}")
+    public ResponseEntity<AccountResponse<AccountDto>> getAccount(@PathVariable long accountId) {
+        accountService.requireOwnedBy(currentUser.id(), accountId);
+        return ResponseEntity.ok(accountService.getAccount(accountId));
+    }
+
+    @PostMapping("/user/{userId}")
+    public ResponseEntity<AccountResponse<AccountDto>> createAccount(@PathVariable long userId) {
+        currentUser.requireSelf(userId);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(accountService.createAccount(userId));
+    }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @PostMapping("/{accountId}/credit")
+    public ResponseEntity<AccountResponse<TransactionDto>> creditAccount(
+            @PathVariable long accountId,
+            @Valid @RequestBody MoneyRequest request
+    ) {
+        AccountResponse<TransactionDto> response = accountService.credit(accountId, request);
+        notifier.adminFunding(accountId, response.data().amount(), true);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @PostMapping("/{accountId}/debit")
+    public ResponseEntity<AccountResponse<TransactionDto>> debitAccount(
+            @PathVariable long accountId,
+            @Valid @RequestBody MoneyRequest request
+    ) {
+        AccountResponse<TransactionDto> response = accountService.debit(accountId, request);
+        notifier.adminFunding(accountId, response.data().amount(), false);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @GetMapping("/{accountId}/transactions")
+    public ResponseEntity<AccountResponse<PageResponse<TransactionDto>>> getTransactionHistory(
+            @PathVariable long accountId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        accountService.requireOwnedBy(currentUser.id(), accountId);
+        return ResponseEntity.ok(accountService.getTransactionHistory(accountId, page, size));
+    }
+
+    @PostMapping("/transfer")
+    public ResponseEntity<AccountResponse<List<TransactionDto>>> transfer(
+            @RequestHeader(value = "X-Transaction-Pin", required = false) String pin,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody TransferRequest request
+    ) {
+        // You may only send money out of your own account; any active account can receive.
+        accountService.requireOwnedBy(currentUser.id(), request.fromAccountId());
+        pinService.verify(currentUser.id(), pin);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(transferService.transfer(currentUser.id(), idempotencyKey, request));
+    }
+
+    @GetMapping("/lookup/{accountNumber}")
+    public ResponseEntity<AccountService.AccountLookup> lookup(@PathVariable String accountNumber) {
+        return ResponseEntity.ok(accountService.lookupByAccountNumber(accountNumber));
+    }
+
+    @PostMapping("/transfer/by-number")
+    public ResponseEntity<AccountResponse<List<TransactionDto>>> transferByNumber(
+            @RequestHeader(value = "X-Transaction-Pin", required = false) String pin,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody TransferByNumberRequest request
+    ) {
+        accountService.requireOwnedBy(currentUser.id(), request.fromAccountId());
+        pinService.verify(currentUser.id(), pin);
+        long toAccountId = accountService.lookupByAccountNumber(request.toAccountNumber()).accountId();
+        return ResponseEntity.status(HttpStatus.CREATED).body(transferService.transfer(currentUser.id(), idempotencyKey,
+                new TransferRequest(request.fromAccountId(), toAccountId, request.amount(), request.description())));
+    }
+
+    @PutMapping("/{accountId}/user/{userId}")
+    public ResponseEntity<AccountResponse<AccountDto>> updateAccount(
+            @PathVariable long accountId,
+            @PathVariable long userId,
+            @Valid @RequestBody AccountUpdate request
+    ) {
+        currentUser.requireSelf(userId);
+        return ResponseEntity.ok(accountService.updateAccount(accountId, userId, request));
+    }
+
+    @PostMapping("/{accountId}/user/{userId}/deactivate")
+    public ResponseEntity<AccountResponse<AccountDto>> deactivateAccount(
+            @PathVariable long accountId,
+            @PathVariable long userId
+    ) {
+        currentUser.requireSelf(userId);
+        return ResponseEntity.ok(accountService.deactivateAccount(userId, accountId));
+    }
+
+    @DeleteMapping("/{accountId}/user/{userId}")
+    public ResponseEntity<AccountResponse<AccountDto>> deleteAccount(
+            @PathVariable long accountId,
+            @PathVariable long userId
+    ) {
+        currentUser.requireSelf(userId);
+        return ResponseEntity.ok(accountService.deleteAccount(userId, accountId));
+    }
+}
