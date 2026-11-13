@@ -1,19 +1,67 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Icon from "../../components/Icon.jsx";
+import { notificationsApi } from "../../services/api.js";
 
-const seed=[
-  {id:1,type:"Payments",icon:"arrowDown",title:"Money received",message:"You received ₦250,000.00 from CHUKWUEMEKA OKAFOR.",time:"Today · 8:16 AM",unread:true,tone:"success",reference:"DB847196221"},
-  {id:2,type:"Security",icon:"settings",title:"New sign-in detected",message:"A new sign-in to your account was detected from Chrome on Windows.",time:"Yesterday · 9:42 PM",unread:true,tone:"warning",reference:"Lagos, Nigeria"},
-  {id:3,type:"Payments",icon:"send",title:"Transfer successful",message:"Your transfer of ₦45,000.00 to Sarah James was successful.",time:"Yesterday · 10:42 AM",unread:false,tone:"info",reference:"DB847210593"},
-  {id:4,type:"Cards",icon:"card",title:"Card payment completed",message:"Your card ending 4826 was charged ₦32,750.50 at Shoprite Lekki.",time:"Jul 31 · 2:08 PM",unread:false,tone:"info",reference:"DB846721008"},
-  {id:5,type:"Account",icon:"receipt",title:"Monthly statement ready",message:"Your July 2026 account statement is ready to download.",time:"Jul 31 · 7:00 AM",unread:false,tone:"neutral",reference:"July 2026"},
-];
+// How a backend notification type is shown.
+const kinds = {
+  CREDIT: { category: "Payments", icon: "arrowDown", tone: "success" },
+  DEBIT: { category: "Payments", icon: "send", tone: "info" },
+  KYC: { category: "Account", icon: "settings", tone: "success" },
+  SECURITY: { category: "Security", icon: "settings", tone: "warning" },
+  SYSTEM: { category: "Account", icon: "receipt", tone: "neutral" },
+};
+const describe = item => {
+  const kind = kinds[item.type] || kinds.SYSTEM;
+  const time = new Date(item.createdAt).toLocaleString("en-NG", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+  return { ...kind, id: item.id, title: item.title, message: item.message, unread: !item.read, time };
+};
 
-export default function NotificationCenter({onClose}){
-  const [items,setItems]=useState(seed);const[filter,setFilter]=useState("All");const[selected,setSelected]=useState(null);const[preferences,setPreferences]=useState(false);
-  const visible=useMemo(()=>filter==="All"?items:filter==="Unread"?items.filter(i=>i.unread):items.filter(i=>i.type===filter),[items,filter]);
-  const unread=items.filter(i=>i.unread).length;const open=item=>{setItems(value=>value.map(i=>i.id===item.id?{...i,unread:false}:i));setSelected({...item,unread:false})};
-  return <div className="notifications-dialog" role="dialog" aria-modal="true"><button className="notifications-backdrop" onClick={onClose}/><section className="notifications-window"><header className="notifications-header"><div><span>INBOX</span><h2>Notifications {unread>0&&<b>{unread}</b>}</h2><p>Important activity and updates from DanBank.</p></div><div><button onClick={()=>setPreferences(true)} aria-label="Notification preferences"><Icon name="settings" size={18}/></button><button onClick={onClose}>×</button></div></header><div className="notification-tools"><div>{["All","Unread","Payments","Security"].map(name=><button key={name} className={filter===name?"active":""} onClick={()=>setFilter(name)}>{name}</button>)}</div>{unread>0&&<button onClick={()=>setItems(value=>value.map(i=>({...i,unread:false})))}>✓ Mark all as read</button>}</div><div className="notification-list">{visible.map(item=><button key={item.id} className={item.unread?"unread":""} onClick={()=>open(item)}><span className={`notification-icon ${item.tone}`}><Icon name={item.icon} size={18}/></span><span className="notification-copy"><strong>{item.title}{item.unread&&<i/>}</strong><p>{item.message}</p><small>{item.time}</small></span><Icon name="chevron" size={16}/></button>)}{!visible.length&&<div className="notifications-empty"><Icon name="bell" size={25}/><h3>You’re all caught up</h3><p>There are no notifications in this category.</p></div>}</div><footer><span>✓</span>Security notifications cannot be disabled.</footer></section>{selected&&<NotificationDetail item={selected} onClose={()=>setSelected(null)}/>} {preferences&&<NotificationPreferences onClose={()=>setPreferences(false)}/>}</div>;
+export default function NotificationCenter({ onClose, onChanged }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [filter, setFilter] = useState("All");
+  const [selected, setSelected] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    notificationsApi.list({ size: 50 })
+      .then(page => { if (active) setItems(page.content.map(describe)); })
+      .catch(requestError => { if (active) setError(requestError.message); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  const visible = useMemo(
+    () => filter === "All" ? items : filter === "Unread" ? items.filter(i => i.unread) : items.filter(i => i.category === filter),
+    [items, filter],
+  );
+  const unread = items.filter(i => i.unread).length;
+
+  const open = item => {
+    setSelected({ ...item, unread: false });
+    if (!item.unread) return;
+    setItems(value => value.map(i => i.id === item.id ? { ...i, unread: false } : i));
+    notificationsApi.markRead(item.id).then(() => onChanged?.()).catch(() => {});
+  };
+  const markAll = () => {
+    setItems(value => value.map(i => ({ ...i, unread: false })));
+    notificationsApi.markAllRead().then(() => onChanged?.()).catch(() => {});
+  };
+
+  return <div className="notifications-dialog" role="dialog" aria-modal="true">
+    <button className="notifications-backdrop" onClick={onClose} />
+    <section className="notifications-window">
+      <header className="notifications-header"><div><span>INBOX</span><h2>Notifications {unread > 0 && <b>{unread}</b>}</h2><p>Important activity and updates from DanBank.</p></div><div><button onClick={onClose}>×</button></div></header>
+      <div className="notification-tools"><div>{["All", "Unread", "Payments", "Account"].map(name => <button key={name} className={filter === name ? "active" : ""} onClick={() => setFilter(name)}>{name}</button>)}</div>{unread > 0 && <button onClick={markAll}>✓ Mark all as read</button>}</div>
+      <div className="notification-list">
+        {visible.map(item => <button key={item.id} className={item.unread ? "unread" : ""} onClick={() => open(item)}><span className={`notification-icon ${item.tone}`}><Icon name={item.icon} size={18} /></span><span className="notification-copy"><strong>{item.title}{item.unread && <i />}</strong><p>{item.message}</p><small>{item.time}</small></span><Icon name="chevron" size={16} /></button>)}
+        {loading && <div className="notifications-empty"><p>Loading your notifications…</p></div>}
+        {error && <div className="notifications-empty"><p className="payment-error">{error}</p></div>}
+        {!loading && !error && !visible.length && <div className="notifications-empty"><Icon name="bell" size={25} /><h3>You’re all caught up</h3><p>There are no notifications in this category.</p></div>}
+      </div>
+      <footer><span>✓</span>Alerts are sent when money moves in or out of your account.</footer>
+    </section>
+    {selected && <div className="notification-layer"><button onClick={() => setSelected(null)} /><aside className="notification-detail"><header><span>NOTIFICATION DETAILS</span><button onClick={() => setSelected(null)}>×</button></header><div className={`detail-notification-icon ${selected.tone}`}><Icon name={selected.icon} size={22} /></div><h3>{selected.title}</h3><p>{selected.message}</p><dl><div><dt>Date</dt><dd>{selected.time}</dd></div><div><dt>Category</dt><dd>{selected.category}</dd></div></dl></aside></div>}
+  </div>;
 }
-function NotificationDetail({item,onClose}){return <div className="notification-layer"><button onClick={onClose}/><aside className="notification-detail"><header><span>NOTIFICATION DETAILS</span><button onClick={onClose}>×</button></header><div className={`detail-notification-icon ${item.tone}`}><Icon name={item.icon} size={22}/></div><h3>{item.title}</h3><p>{item.message}</p><dl><div><dt>Date</dt><dd>{item.time}</dd></div><div><dt>{item.type==="Security"?"Location":"Reference"}</dt><dd>{item.reference}</dd></div><div><dt>Category</dt><dd>{item.type}</dd></div></dl>{item.type==="Security"&&<><div className="security-question"><strong>Was this you?</strong><p>If you don’t recognize this activity, secure your account immediately.</p></div><button className="notification-primary">Yes, this was me</button><button className="notification-danger">No, secure my account</button></>}</aside></div>}
-function NotificationPreferences({onClose}){const[settings,setSettings]=useState({transactions:true,security:true,bills:true,products:false,email:true,push:true,sms:false});const toggle=key=>setSettings(v=>({...v,[key]:!v[key]}));return <div className="notification-layer"><button onClick={onClose}/><aside className="notification-detail preferences"><header><span>PREFERENCES</span><button onClick={onClose}>×</button></header><h3>Notification preferences</h3><p>Choose which updates you receive and how we contact you.</p><h4>Updates</h4>{[["transactions","Transactions","Transfers, card payments, and deposits"],["security","Security alerts","Sign-ins and important account changes"],["bills","Bills and reminders","Upcoming and completed bill payments"],["products","Product updates","New DanBank features and offers"]].map(([key,title,text])=><button className="preference-row" key={key} disabled={key==="security"} onClick={()=>toggle(key)}><span><strong>{title}</strong><small>{text}</small></span><i className={settings[key]?"on":""}><b/></i></button>)}<h4>Delivery channels</h4>{[["push","Push notifications"],["email","Email"],["sms","SMS"]].map(([key,title])=><button className="preference-row compact" key={key} onClick={()=>toggle(key)}><span><strong>{title}</strong></span><i className={settings[key]?"on":""}><b/></i></button>)}<button className="notification-primary" onClick={onClose}>Save preferences</button></aside></div>}

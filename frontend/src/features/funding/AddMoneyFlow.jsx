@@ -1,42 +1,35 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Icon from "../../components/Icon.jsx";
 
-const money = new Intl.NumberFormat("en-NG",{style:"currency",currency:"NGN",minimumFractionDigits:2});
+const money = new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN", minimumFractionDigits: 2 });
 
-export default function AddMoneyFlow({ user,onClose,onComplete }) {
-  const [method,setMethod] = useState(null);
-  const [stage,setStage] = useState("method");
-  const [amount,setAmount] = useState("");
-  const [card,setCard] = useState({number:"",expiry:"",cvv:""});
-  const [pin,setPin] = useState("");
-  const [error,setError] = useState("");
-  const [copied,setCopied] = useState("");
-  const numericAmount = Number(amount);
-  const fee = method==="card" ? Math.min(Math.max(numericAmount*.015,100),2000) : 0;
-  const fullName = `${user.firstName||"David"} ${user.lastName||"Adekunle"}`;
-
-  useEffect(()=>{if(stage!=="processing")return;const timer=setTimeout(()=>setStage("success"),1500);return()=>clearTimeout(timer)},[stage]);
-  const choose = value => {setMethod(value);setStage(value==="transfer"?"transfer":"details");setError("")};
-  const copy = async (value,label) => {try{await navigator.clipboard.writeText(value);setCopied(label);setTimeout(()=>setCopied(""),1800)}catch{setCopied("Copy unavailable")}};
-  const updateCard = (key,value) => {
-    let next=value.replace(/\D/g,"");
-    if(key==="number")next=next.slice(0,16).replace(/(.{4})/g,"$1 ").trim();
-    if(key==="expiry")next=next.slice(0,4).replace(/^(\d{2})(\d)/,"$1/$2");
-    if(key==="cvv")next=next.slice(0,3);
-    setCard(current=>({...current,[key]:next}));setError("");
+export default function AddMoneyFlow({ account, onClose }) {
+  const [copied, setCopied] = useState("");
+  const copy = async (value, label) => {
+    try { await navigator.clipboard.writeText(value); setCopied(label); }
+    catch { setCopied("Copy unavailable"); }
+    setTimeout(() => setCopied(""), 1800);
   };
-  const review = event => {event.preventDefault();if(!numericAmount||numericAmount<1000)return setError("Enter an amount of at least ₦1,000.");if(numericAmount>1000000)return setError("Card funding is limited to ₦1,000,000 per transaction.");if(card.number.replace(/\D/g,"").length!==16||card.expiry.length!==5||card.cvv.length!==3)return setError("Enter complete and valid card details.");setError("");setStage("review")};
-  const authorize = event => {event.preventDefault();if(!/^\d{4}$/.test(pin))return setError("Enter the 4-digit authorization code.");setError("");setStage("processing")};
-  const finish = () => {onComplete?.();onClose()};
 
-  return <div className="funding-dialog" role="dialog" aria-modal="true"><button className="funding-backdrop" onClick={onClose}/><section className="funding-window"><header className="funding-header"><div><span>FUND YOUR ACCOUNT</span><h2>{stage==="success"?"Money added":"Add money"}</h2><p>{stage==="method"?"Choose how you want to fund your DanBank account.":method==="transfer"?"Receive money through a secure bank transfer.":"Fund securely with a Nigerian debit card."}</p></div><button onClick={onClose}>×</button></header>
-    {stage!=="success"&&stage!=="processing"&&<div className="funding-account"><div><span>Money will be added to</span><strong>Personal Savings · 6789</strong></div><b>₦2,580,420.75</b></div>}
-    {stage==="method"&&<section className="funding-methods"><button onClick={()=>choose("transfer")}><span><Icon name="transfer" size={23}/></span><div><strong>Bank transfer</strong><small>Transfer from any Nigerian bank</small><em>Recommended · No fee</em></div><Icon name="chevron" size={18}/></button><button onClick={()=>choose("card")}><span><Icon name="card" size={23}/></span><div><strong>Debit card</strong><small>Add money with a Visa or Mastercard</small><em>Processed securely · Fees apply</em></div><Icon name="chevron" size={18}/></button><div className="funding-trust"><span>✓</span><p><strong>Protected funding</strong>DanBank encrypts your information and never stores your CVV.</p></div></section>}
-    {stage==="transfer"&&<section className="transfer-funding"><div className="funding-badge"><Icon name="transfer" size={21}/></div><h3>Your DanBank funding account</h3><p>Transfer from any Nigerian bank using the details below. Your balance updates after payment is confirmed.</p><dl><div><dt>Bank name</dt><dd>DanBank Partner Bank <button onClick={()=>copy("DanBank Partner Bank","Bank name")}>▣</button></dd></div><div><dt>Account number</dt><dd className="funding-number">0123456789 <button onClick={()=>copy("0123456789","Account number")}>▣</button></dd></div><div><dt>Account name</dt><dd>{fullName.toUpperCase()} <button onClick={()=>copy(fullName.toUpperCase(),"Account name")}>▣</button></dd></div><div><dt>Account type</dt><dd>Virtual funding account</dd></div></dl>{copied&&<div className="copy-notice">✓ {copied} copied</div>}<div className="funding-info"><span>i</span><p>Only transfer from an account you control. Most transfers arrive within a few minutes, but delays may occur at the sending bank.</p></div><button className="funding-primary" onClick={()=>window.print()}><Icon name="receipt" size={17}/> Download account details</button><button className="funding-text" onClick={()=>setStage("method")}>Choose another method</button></section>}
-    {stage==="details"&&<form className="card-funding-form" onSubmit={review}><div className="funding-stage-title"><h3>Enter funding details</h3><p>Use a debit card registered in your name.</p></div><div className="funding-amount"><label>AMOUNT TO ADD</label><div><span>₦</span><input value={amount} onChange={e=>{setAmount(e.target.value.replace(/\D/g,""));setError("")}} inputMode="numeric" placeholder="0.00" autoFocus/></div><section>{[10000,25000,50000,100000].map(value=><button type="button" key={value} onClick={()=>setAmount(String(value))}>₦{value.toLocaleString()}</button>)}</section><small>Minimum ₦1,000 · Maximum ₦1,000,000</small></div><label>Card number<div className="card-number-input"><Icon name="card" size={18}/><input value={card.number} onChange={e=>updateCard("number",e.target.value)} inputMode="numeric" placeholder="0000 0000 0000 0000"/><b>VISA</b></div></label><div className="funding-field-row"><label>Expiry date<input value={card.expiry} onChange={e=>updateCard("expiry",e.target.value)} inputMode="numeric" placeholder="MM/YY"/></label><label>CVV<input value={card.cvv} onChange={e=>updateCard("cvv",e.target.value)} inputMode="numeric" type="password" placeholder="•••"/></label></div><div className="card-data-note"><span>✓</span>Your card details are encrypted. CVV is never stored.</div>{error&&<p className="payment-error">{error}</p>}<div className="payment-actions"><button type="button" className="payment-secondary" onClick={()=>setStage("method")}>Back</button><button className="funding-primary" type="submit">Review funding <Icon name="chevron" size={18}/></button></div></form>}
-    {stage==="review"&&<section className="funding-review"><div className="funding-stage-title"><h3>Review funding</h3><p>Confirm the amount and fee before authorization.</p></div><div className="funding-review-amount"><small>YOU WILL RECEIVE</small><strong>{money.format(numericAmount)}</strong><span>in Personal Savings · 6789</span></div><dl><div><dt>Funding method</dt><dd>Visa · {card.number.slice(-4)}</dd></div><div><dt>Amount</dt><dd>{money.format(numericAmount)}</dd></div><div><dt>Processing fee</dt><dd>{money.format(fee)}</dd></div><div className="funding-total"><dt>Total card charge</dt><dd>{money.format(numericAmount+fee)}</dd></div></dl><div className="intent-warning"><span>!</span><p>Your bank may request additional authentication before approving this payment.</p></div><div className="payment-actions"><button className="payment-secondary" onClick={()=>setStage("details")}>Edit</button><button className="funding-primary" onClick={()=>setStage("authorize")}>Continue securely <Icon name="chevron" size={18}/></button></div></section>}
-    {stage==="authorize"&&<form className="funding-authorize" onSubmit={authorize}><span className="authorize-shield">✓</span><h3>Verify this card payment</h3><p>Enter the 4-digit sandbox code sent by your card issuer to approve <strong>{money.format(numericAmount+fee)}</strong>.</p><div className="pin-dots">{[0,1,2,3].map(i=><span key={i} className={pin.length>i?"filled":""}/>)}</div><input className="hidden-pin" value={pin} onChange={e=>{setPin(e.target.value.replace(/\D/g,"").slice(0,4));setError("")}} inputMode="numeric" type="password" autoFocus/>{error&&<p className="payment-error">{error}</p>}<button className="funding-primary" type="submit">Verify and add money</button><button className="funding-text" type="button" onClick={()=>setStage("review")}>Cancel authorization</button></form>}
-    {stage==="processing"&&<section className="funding-state"><span className="secure-loader"><i/></span><h3>Adding money securely</h3><p>We’re confirming your payment with the card issuer.</p><div className="processing-steps"><span className="done">Card verified</span><span className="active">Confirming payment</span><span>Updating balance</span></div></section>}
-    {stage==="success"&&<section className="funding-state funding-success"><span className="confirmed-mark">✓</span><small>FUNDING SUCCESSFUL</small><h3>{money.format(numericAmount)}</h3><p>has been added to your Personal Savings account.</p><div className="new-balance"><span>New available balance</span><strong>{money.format(2580420.75+numericAmount)}</strong></div><dl><div><dt>Reference</dt><dd>DBF{Date.now().toString().slice(-8)}</dd></div><div><dt>Funding method</dt><dd>Visa · {card.number.slice(-4)}</dd></div><div><dt>Status</dt><dd>Successful</dd></div></dl><button className="funding-primary" onClick={finish}>Return to dashboard</button><button className="funding-text" onClick={()=>window.print()}>Download receipt</button></section>}
-  </section></div>;
+  return <div className="funding-dialog" role="dialog" aria-modal="true">
+    <button className="funding-backdrop" onClick={onClose} />
+    <section className="funding-window">
+      <header className="funding-header"><div><span>FUND YOUR ACCOUNT</span><h2>Add money</h2><p>Receive money by bank transfer to your DanBank account.</p></div><button onClick={onClose}>×</button></header>
+      <div className="funding-account"><div><span>Money will be added to</span><strong>{account.name} · {account.number.slice(-4)}</strong></div><b>{money.format(account.balance)}</b></div>
+      <section className="transfer-funding">
+        <div className="funding-badge"><Icon name="transfer" size={21} /></div>
+        <h3>Your DanBank account details</h3>
+        <p>Anyone with a DanBank account can send money to the account number below. Your balance updates as soon as the transfer completes.</p>
+        <dl>
+          <div><dt>Bank name</dt><dd>DanBank <button onClick={() => copy("DanBank", "Bank name")}>▣</button></dd></div>
+          <div><dt>Account number</dt><dd className="funding-number">{account.number} <button onClick={() => copy(account.number, "Account number")}>▣</button></dd></div>
+          <div><dt>Account name</dt><dd>{account.name.toUpperCase()} <button onClick={() => copy(account.name.toUpperCase(), "Account name")}>▣</button></dd></div>
+          <div><dt>Account type</dt><dd>{account.type}</dd></div>
+        </dl>
+        {copied && <div className="copy-notice">✓ {copied} copied</div>}
+        <div className="funding-info"><span>i</span><p>Adding money with a debit card and receiving transfers from other Nigerian banks are coming soon.</p></div>
+        <button className="funding-primary" onClick={() => window.print()}><Icon name="receipt" size={17} /> Download account details</button>
+      </section>
+    </section>
+  </div>;
 }
