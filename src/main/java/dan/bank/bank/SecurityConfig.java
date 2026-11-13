@@ -40,6 +40,7 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
+                                "/api/v1/webhooks/paystack",
                                 // Errors (404, 403, 409...) are forwarded to /error. If it needs a login,
                                 // every real error is reported as 401 instead of its true status.
                                 "/error"

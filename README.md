@@ -13,6 +13,7 @@ Built with Spring Boot, PostgreSQL and Flyway.
 - [Frontend](#frontend)
 - [API Overview](#api-overview)
 - [Security Model](#security-model)
+- [Card Deposits (Paystack)](#card-deposits-paystack)
 - [Trying It in Swagger](#trying-it-in-swagger)
 - [KYC and Face Verification](#kyc-and-face-verification)
 - [How Transfers Work](#how-transfers-work)
@@ -31,6 +32,7 @@ Built with Spring Boot, PostgreSQL and Flyway.
 - KYC with face verification (pluggable provider) and tier-based limits: unverified users get stricter limits
 - Paged transaction history, plus statements with date and type filters, opening and closing balances, and CSV export
 - Saved beneficiaries (recipients)
+- Card deposits through Paystack (signed webhook, verified server-side, credited exactly once)
 - In-app notifications for debits, credits and KYC results
 - Roles (`USER`, `ADMIN`); only admins can credit or debit accounts directly
 - Ownership checks: users can only access their own data
@@ -112,6 +114,9 @@ All settings come from environment variables (see `src/main/resources/applicatio
 | `JWT_SECRET` | Yes | Base64-encoded signing key, at least 32 bytes |
 | `ADMIN_EMAIL` | No | Sign up first, then set this to promote that user to `ADMIN` at startup |
 | `FEE_INCOME_ACCOUNT` | No | Account number that receives transfer fees. **Fees are only charged when this is set.** |
+| `PAYSTACK_SECRET_KEY` | No | Paystack secret key. **Card deposits are off until this is set.** Use a test key (`sk_test_...`) until you go live, and never commit it. |
+| `PAYSTACK_CALLBACK_URL` | No | Where Paystack sends the customer after paying: your frontend's address (default `http://localhost:5173`) |
+| `PAYSTACK_BASE_URL` | No | Defaults to `https://api.paystack.co`. Only change it to point at the local stand-in |
 | `kyc.face.provider` | No | Face-verification provider. Unset by default (the KYC endpoint returns 503). `stub` is for local development only. |
 
 Limits and fee tiers live in `application.properties` (`bank.limits.*`, `bank.fees.*`). Unverified users use the stricter `bank.limits.tier0-*` values. The default values are placeholders. Set real ones before going live.
@@ -130,8 +135,8 @@ In development Vite forwards `/api` to the backend at `http://localhost:8080` (s
 
 Notes:
 - Tokens are kept in memory only. Refreshing the page signs you out, and an expired access token is refreshed automatically.
-- **Working with real data:** sign-up, sign-in, dashboard, send money (PIN, fee, limits, receipt), beneficiaries, notifications, history, statements (preview and CSV), accounts (open and close), PIN setup, limits and identity verification.
-- **Not built yet** (shown as "coming soon" for real accounts): cards, savings goals, scheduled payments, bill payments and airtime, financial insights, password change in the app, card top-up.
+- **Working with real data:** sign-up, sign-in, dashboard, add money by card (Paystack), send money (PIN, fee, limits, receipt), beneficiaries, notifications, history, statements (preview and CSV), accounts (open and close), PIN setup, limits and identity verification.
+- **Not built yet** (shown as "coming soon" for real accounts): cards, savings goals, scheduled payments, bill payments and airtime, financial insights, password change in the app.
 - For local testing of the identity check, start the backend with `KYC_FACE_PROVIDER=stub`. The stub approves any photo and must never be used in production.
 - New accounts start with zero balance. To fund one while testing, make a user an admin (`ADMIN_EMAIL`) and call `POST /accounts/{id}/credit`.
 
@@ -201,6 +206,14 @@ All endpoints are under `/api/v1`. Everything except sign-up, `/auth/**` and the
 
 Debit and credit alerts are created after each transfer or admin funding. They are best effort: a notification failure never fails or repeats a transfer.
 
+### Deposits
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/deposits` | Start a card payment: `{accountId, amount}`. Returns `{reference, authorizationUrl}`; send the customer to that URL |
+| GET | `/deposits/{reference}` | Status (`PENDING`, `SUCCESS`, `FAILED`). If still pending it asks Paystack, so it also works when webhooks cannot reach you |
+| POST | `/webhooks/paystack` | Called by Paystack, not by your app. Public, protected by the `x-paystack-signature` header |
+
 ### KYC
 
 | Method | Path | Description |
@@ -243,6 +256,43 @@ Amounts must be at least `0.01` and have at most 2 decimal places.
 - Transfers need the transaction PIN. Five wrong attempts lock it for 15 minutes.
 - Direct credit and debit are admin-only.
 - CSRF is disabled because the API is stateless and token-based.
+
+## Card Deposits (Paystack)
+
+Users can add money with a card. The customer pays on Paystack's own page, so card details never touch this server.
+
+**How it works**
+1. `POST /deposits` creates a `PENDING` deposit and asks Paystack to start a payment (the amount is sent in kobo).
+2. The customer is sent to Paystack and pays.
+3. Paystack calls `POST /webhooks/paystack` with a signed `charge.success` event. The server checks the signature, then the amount and currency against what it asked for, and only then credits the account.
+4. When the customer returns to the app, it also asks `GET /deposits/{reference}`, which verifies with Paystack. Whichever of the two arrives first credits the account and the other does nothing.
+
+**Safety rules built in**
+- Money is never credited because a browser says so. Only a validly signed webhook or a server-to-server verify can credit it.
+- The signature is HMAC-SHA512 over the exact raw request body, compared in constant time. Missing, wrong or tampered signatures get 401.
+- Each deposit is credited **once**, however many webhooks, retries or page reloads happen: the deposit row is locked while settling, and the ledger entry has a unique `DEP-<reference>`.
+- A paid amount or currency that differs from the request is **not** credited. The deposit is marked `FAILED` and an `ERROR` line (`DEPOSIT MISMATCH`) is logged so a person can follow it up with Paystack.
+- No secret key means deposits are switched off (503) and the webhook refuses everything.
+- Limits: at least ₦100; at most ₦1,000,000 per deposit, or ₦50,000 until the user is identity-verified (`bank.deposits.*`). Fees charged by Paystack are paid by you, not added to the customer's amount.
+
+**Going live with Paystack**
+1. Create a Paystack account and copy your **test** secret key from *Settings → API Keys & Webhooks*.
+2. Set `PAYSTACK_SECRET_KEY=sk_test_...` (and `PAYSTACK_CALLBACK_URL` to your frontend's public address) for the backend.
+3. In the same Paystack settings page, set the **Test Webhook URL** to `https://<your-api-host>/api/v1/webhooks/paystack`. Paystack cannot reach `localhost`; to try webhooks from your laptop, use a tunnel such as ngrok. Without a webhook, deposits still complete when the customer returns to the app (step 4 above).
+4. Pay with one of Paystack's test cards, then switch to your live key only after you are happy.
+
+This was written from Paystack's public API documentation and tested against a local stand-in, **not** against the real Paystack. Do a test-mode payment end to end before relying on it.
+
+**Trying it without a Paystack account**
+
+`tools/fake-paystack/server.js` is a local stand-in (Node only, nothing to install) with a fake checkout page:
+
+```bash
+node tools/fake-paystack/server.js
+PAYSTACK_SECRET_KEY=sk_test_fake_dev_secret PAYSTACK_BASE_URL=http://localhost:9099 mvn spring-boot:run
+```
+
+It is for development only and proves nothing about the real Paystack. Never point production at it.
 
 ## Trying It in Swagger
 
@@ -304,7 +354,7 @@ Tests run against an in-memory H2 database in PostgreSQL mode, with the real Fly
 ## Roadmap
 
 - A real face-verification adapter (Smile ID, Youverify or Dojah) and ID-document checks for higher KYC tiers
-- Payment provider integration for deposits and withdrawals (Paystack or Flutterwave)
+- Withdrawals and transfers to other banks (payouts)
 - Email and SMS delivery for notifications, and PDF statements
 - Bill payments (airtime, data, electricity)
 - Double-entry ledger and audit log

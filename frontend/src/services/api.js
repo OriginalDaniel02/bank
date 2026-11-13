@@ -125,6 +125,12 @@ export const accountsApi = {
     }),
 };
 
+export const depositsApi = {
+  /** Starts a card payment; send the customer to the returned authorizationUrl. */
+  start: (accountId, amount) => request("/deposits", json("POST", { accountId, amount })),
+  status: reference => request(`/deposits/${encodeURIComponent(reference)}`),
+};
+
 export const beneficiariesApi = {
   list: () => request("/beneficiaries"),
   add: (accountNumber, nickname) => request("/beneficiaries", json("POST", { accountNumber, nickname })),
