@@ -1,8 +1,8 @@
 package dan.bank.bank;
 
-import dan.bank.bank.Auth.TokenService;
-import dan.bank.bank.User.model.User;
-import dan.bank.bank.User.repository.UserRepository;
+import dan.bank.bank.auth.TokenService;
+import dan.bank.bank.user.model.User;
+import dan.bank.bank.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -58,5 +58,23 @@ class RealServerErrorStatusTests {
     @Test
     void garbageTokenIsStillUnauthorized() throws Exception {
         assertEquals(401, get("/api/v1/accounts", "not-a-jwt"));
+    }
+
+    @Test
+    void swaggerDocsAreOpenAndOfferBearerAuthorization() throws Exception {
+        HttpResponse<String> response = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/v3/api-docs")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, response.statusCode());
+        org.junit.jupiter.api.Assertions.assertTrue(response.body().contains("bearerAuth"));
+        org.junit.jupiter.api.Assertions.assertTrue(response.body().contains("X-Transaction-Pin"));
+        org.junit.jupiter.api.Assertions.assertTrue(response.body().contains("Idempotency-Key"));
+    }
+
+    @Test
+    void swaggerUiPageIsPublic() throws Exception {
+        assertEquals(200, get("/swagger-ui/index.html", null));
+        int shortcut = get("/swagger-ui.html", null);
+        org.junit.jupiter.api.Assertions.assertTrue(shortcut == 200 || shortcut == 302, "unexpected status " + shortcut);
     }
 }

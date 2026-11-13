@@ -12,6 +12,7 @@ Built with Spring Boot, PostgreSQL and Flyway.
 - [Configuration](#configuration)
 - [API Overview](#api-overview)
 - [Security Model](#security-model)
+- [Trying It in Swagger](#trying-it-in-swagger)
 - [KYC and Face Verification](#kyc-and-face-verification)
 - [How Transfers Work](#how-transfers-work)
 - [Project Structure](#project-structure)
@@ -27,7 +28,9 @@ Built with Spring Boot, PostgreSQL and Flyway.
 - Idempotent transfers via an `Idempotency-Key` header, so a retry never moves money twice
 - Per-transfer and daily limits, and tiered transfer fees credited to an income account
 - KYC with face verification (pluggable provider) and tier-based limits: unverified users get stricter limits
-- Paged transaction history
+- Paged transaction history, plus statements with date and type filters, opening and closing balances, and CSV export
+- Saved beneficiaries (recipients)
+- In-app notifications for debits, credits and KYC results
 - Roles (`USER`, `ADMIN`); only admins can credit or debit accounts directly
 - Ownership checks: users can only access their own data
 - Concurrency-safe balance updates (pessimistic locking in account-id order plus optimistic versioning)
@@ -95,7 +98,7 @@ Flyway creates and updates the schema on startup.
 
 ### API docs
 
-Swagger UI is at `http://localhost:8080/swagger-ui/index.html`.
+Swagger UI is at `http://localhost:8080/swagger-ui/index.html` (see [Trying It in Swagger](#trying-it-in-swagger)).
 
 ## Configuration
 
@@ -153,6 +156,31 @@ All endpoints are under `/api/v1`. Everything except sign-up, `/auth/**` and the
 | POST | `/accounts/{id}/credit` | **Admin only.** Add funds |
 | POST | `/accounts/{id}/debit` | **Admin only.** Remove funds |
 
+### Statements
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/accounts/{id}/statement` | Query: `from`, `to` (`yyyy-MM-dd`, inclusive, default last 30 days), `type`, `format=json\|csv`. Max range 366 days. Includes opening and closing balances and a running balance per line. |
+
+### Beneficiaries
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/beneficiaries` | Your saved recipients |
+| POST | `/beneficiaries` | Save a recipient: `{accountNumber, nickname?}` (the name is looked up for you) |
+| DELETE | `/beneficiaries/{id}` | Remove one |
+
+### Notifications
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/notifications?unread=&page=&size=` | Your notifications, newest first |
+| GET | `/notifications/unread-count` | `{ "unread": n }` |
+| POST | `/notifications/{id}/read` | Mark one as read |
+| POST | `/notifications/read-all` | Mark all as read |
+
+Debit and credit alerts are created after each transfer or admin funding. They are best effort: a notification failure never fails or repeats a transfer.
+
 ### KYC
 
 | Method | Path | Description |
@@ -196,6 +224,18 @@ Amounts must be at least `0.01` and have at most 2 decimal places.
 - Direct credit and debit are admin-only.
 - CSRF is disabled because the API is stateless and token-based.
 
+## Trying It in Swagger
+
+1. Start the app and open `http://localhost:8080/swagger-ui/index.html`.
+2. **Sign up:** `POST /api/v1/users/signUp`. The password needs 8 to 64 characters with upper case, lower case, a digit and one of `@#$%&*!`. The date format is `dd-MM-yyyy`.
+3. **Log in:** `POST /api/v1/auth/login`, then copy the `accessToken`.
+4. Click **Authorize** (top right), paste the token **without** the word `Bearer`, and confirm.
+5. Open an account with `POST /accounts/user/{userId}` (your own id), and set a PIN with `POST /users/me/pin`.
+6. To fund an account you need an admin (`ADMIN_EMAIL`). Log in as the admin, authorize with that token, and call `POST /accounts/{id}/credit`.
+7. For transfers, fill in the `X-Transaction-Pin` field and, optionally, `Idempotency-Key` (any unique text). Reusing the same key and body returns the first result instead of sending money again.
+
+Access tokens last 15 minutes. After that, log in again or use `/auth/refresh`.
+
 ## KYC and Face Verification
 
 Users start at **tier 0** (unverified) with stricter transfer limits. A successful face check moves them to **tier 1**, which uses the standard limits.
@@ -221,13 +261,15 @@ Users start at **tier 0** (unverified) with stricter transfer limits. A successf
 
 ```
 src/main/java/dan/bank/bank
-├── Account/   accounts, transactions, transfers, limits and fees, idempotency
-├── Auth/      JWT filter, token service, refresh tokens, current-user helper
-├── Kyc/       face verification port, KYC tiers, selfie upload
-├── User/      users, roles, transaction PIN
-├── SecurityConfig.java
-└── ApiExceptionHandler.java
-src/main/resources/db/migration   Flyway migrations (V1 to V5)
+├── account/       accounts, transfers, limits and fees, idempotency, statements
+├── auth/          JWT filter, token service, refresh tokens, current-user helper
+├── beneficiary/   saved recipients
+├── kyc/           face verification port, KYC tiers, selfie upload
+├── notification/  in-app notifications and transfer alerts
+├── user/          users, roles, transaction PIN
+├── SecurityConfig.java, OpenApiConfig.java, ApiExceptionHandler.java
+└── AdminBootstrap.java
+src/main/resources/db/migration   Flyway migrations (V1 to V6)
 src/test                          unit and integration tests (H2)
 ```
 
@@ -243,7 +285,7 @@ Tests run against an in-memory H2 database in PostgreSQL mode, with the real Fly
 
 - A real face-verification adapter (Smile ID, Youverify or Dojah) and ID-document checks for higher KYC tiers
 - Payment provider integration for deposits and withdrawals (Paystack or Flutterwave)
-- Beneficiaries, statements (PDF/CSV) and notifications
+- Email and SMS delivery for notifications, and PDF statements
 - Bill payments (airtime, data, electricity)
 - Double-entry ledger and audit log
 - CI pipeline and a frontend

@@ -1,17 +1,15 @@
 package dan.bank.bank;
 
-import dan.bank.bank.Account.dtos.AccountResponse;
-import dan.bank.bank.Account.dtos.PageResponse;
-import dan.bank.bank.Account.dtos.TransactionDto;
-import dan.bank.bank.Account.model.Account;
-import dan.bank.bank.Account.model.AccountStatus;
-import dan.bank.bank.Account.model.AccountTransaction;
-import dan.bank.bank.Account.model.AccountType;
-import dan.bank.bank.Account.model.TransactionType;
-import dan.bank.bank.Account.repository.AccountRepo;
-import dan.bank.bank.Account.repository.AccountTransactionRepository;
-import dan.bank.bank.Account.service.AccountServ;
-import dan.bank.bank.User.repository.UserRepository;
+import dan.bank.bank.account.dto.AccountResponse;
+import dan.bank.bank.account.dto.PageResponse;
+import dan.bank.bank.account.dto.TransactionDto;
+import dan.bank.bank.account.model.Account;
+import dan.bank.bank.account.model.AccountTransaction;
+import dan.bank.bank.account.model.TransactionType;
+import dan.bank.bank.account.repository.AccountRepository;
+import dan.bank.bank.account.repository.AccountTransactionRepository;
+import dan.bank.bank.account.service.AccountService;
+import dan.bank.bank.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,7 +39,7 @@ import static org.mockito.Mockito.when;
 class AccountTransactionHistoryTest {
 
     @Mock
-    private AccountRepo accountRepository;
+    private AccountRepository accountRepository;
 
     @Mock
     private AccountTransactionRepository transactionRepository;
@@ -49,11 +47,11 @@ class AccountTransactionHistoryTest {
     @Mock
     private UserRepository userRepository;
 
-    private AccountServ accountService;
+    private AccountService accountService;
 
     @BeforeEach
     void setUp() {
-        accountService = new AccountServ(accountRepository, transactionRepository, userRepository);
+        accountService = new AccountService(accountRepository, transactionRepository, userRepository);
     }
 
     @Test

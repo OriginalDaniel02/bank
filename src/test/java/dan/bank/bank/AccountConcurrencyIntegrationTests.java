@@ -1,14 +1,14 @@
 package dan.bank.bank;
 
-import dan.bank.bank.Account.dtos.AccountDto;
-import dan.bank.bank.Account.dtos.MoneyRequest;
-import dan.bank.bank.Account.dtos.TransferRequest;
-import dan.bank.bank.Account.repository.AccountRepo;
-import dan.bank.bank.Account.repository.AccountTransactionRepository;
-import dan.bank.bank.Account.service.AccountServ;
-import dan.bank.bank.Auth.repository.RefreshTokenRepository;
-import dan.bank.bank.User.model.User;
-import dan.bank.bank.User.repository.UserRepository;
+import dan.bank.bank.account.dto.AccountDto;
+import dan.bank.bank.account.dto.MoneyRequest;
+import dan.bank.bank.account.dto.TransferRequest;
+import dan.bank.bank.account.repository.AccountRepository;
+import dan.bank.bank.account.repository.AccountTransactionRepository;
+import dan.bank.bank.account.service.AccountService;
+import dan.bank.bank.auth.repository.RefreshTokenRepository;
+import dan.bank.bank.user.model.User;
+import dan.bank.bank.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,10 +35,10 @@ class AccountConcurrencyIntegrationTests {
     private static final BigDecimal REQUEST_AMOUNT = new BigDecimal("5.00");
 
     @Autowired
-    private AccountServ accountService;
+    private AccountService accountService;
 
     @Autowired
-    private AccountRepo accountRepository;
+    private AccountRepository accountRepository;
 
     @Autowired
     private AccountTransactionRepository transactionRepository;

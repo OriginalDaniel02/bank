@@ -1,20 +1,19 @@
 package dan.bank.bank;
 
-import dan.bank.bank.Account.dtos.MoneyRequest;
-import dan.bank.bank.Account.dtos.TransferRequest;
-import dan.bank.bank.Account.repository.AccountRepo;
-import dan.bank.bank.Account.repository.AccountTransactionRepository;
-import dan.bank.bank.Account.service.AccountServ;
-import dan.bank.bank.Account.service.IdempotentTransferService;
-import dan.bank.bank.Account.service.TransferPolicy;
-import dan.bank.bank.Auth.repository.RefreshTokenRepository;
-import dan.bank.bank.User.model.User;
-import dan.bank.bank.User.repository.UserRepository;
+import dan.bank.bank.account.dto.MoneyRequest;
+import dan.bank.bank.account.dto.TransferRequest;
+import dan.bank.bank.account.repository.AccountRepository;
+import dan.bank.bank.account.repository.AccountTransactionRepository;
+import dan.bank.bank.account.service.AccountService;
+import dan.bank.bank.account.service.IdempotentTransferService;
+import dan.bank.bank.account.service.TransferPolicy;
+import dan.bank.bank.auth.repository.RefreshTokenRepository;
+import dan.bank.bank.user.model.User;
+import dan.bank.bank.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
@@ -25,13 +24,13 @@ import static org.junit.jupiter.api.Assertions.*;
 @SpringBootTest
 class TransferRulesTests {
 
-    @Autowired AccountRepo accountRepository;
+    @Autowired AccountRepository accountRepository;
     @Autowired AccountTransactionRepository transactionRepository;
     @Autowired RefreshTokenRepository refreshTokenRepository;
     @Autowired UserRepository userRepository;
-    @Autowired AccountServ defaultService;
+    @Autowired AccountService defaultService;
     @Autowired IdempotentTransferService idempotentService;
-    @Autowired dan.bank.bank.Account.repository.IdempotencyKeyRepository idempotencyKeyRepository;
+    @Autowired dan.bank.bank.account.repository.IdempotencyKeyRepository idempotencyKeyRepository;
     @Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
 
     /** Services built with `new` are not Spring proxies, so give them a transaction like the real ones have. */
@@ -56,8 +55,8 @@ class TransferRulesTests {
 
     private long account(User user) { return defaultService.createAccount(user.getId()).data().id(); }
 
-    private AccountServ serviceWith(TransferPolicy policy) {
-        return new AccountServ(accountRepository, transactionRepository, userRepository, policy);
+    private AccountService serviceWith(TransferPolicy policy) {
+        return new AccountService(accountRepository, transactionRepository, userRepository, policy);
     }
 
     private static TransferPolicy policy(String perTransfer, String daily, String incomeAccount) {
@@ -109,7 +108,7 @@ class TransferRulesTests {
 
     @Test
     void perTransferAndDailyLimitsAreEnforced() {
-        AccountServ limited = serviceWith(policy("50.00", "80.00", ""));
+        AccountService limited = serviceWith(policy("50.00", "80.00", ""));
         long from = account(newUser()), to = account(newUser());
         tx(() -> limited.credit(from, new MoneyRequest(new BigDecimal("500.00"), "seed")));
 
@@ -125,7 +124,7 @@ class TransferRulesTests {
     void feeIsChargedToSenderAndCreditedToIncomeAccountPreservingTotalMoney() {
         long income = account(newUser());
         String incomeNumber = accountRepository.findById(income).orElseThrow().getAccountNumber();
-        AccountServ withFees = serviceWith(policy("100000.00", "100000.00", incomeNumber));
+        AccountService withFees = serviceWith(policy("100000.00", "100000.00", incomeNumber));
         long from = account(newUser()), to = account(newUser());
         tx(() -> withFees.credit(from, new MoneyRequest(new BigDecimal("500.00"), "seed")));
 
@@ -140,7 +139,7 @@ class TransferRulesTests {
     void transferFailsWhenBalanceCannotCoverAmountPlusFee() {
         long income = account(newUser());
         String incomeNumber = accountRepository.findById(income).orElseThrow().getAccountNumber();
-        AccountServ withFees = serviceWith(policy("100000.00", "100000.00", incomeNumber));
+        AccountService withFees = serviceWith(policy("100000.00", "100000.00", incomeNumber));
         long from = account(newUser()), to = account(newUser());
         tx(() -> withFees.credit(from, new MoneyRequest(new BigDecimal("50.00"), "seed")));
 
