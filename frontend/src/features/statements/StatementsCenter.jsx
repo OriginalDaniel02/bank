@@ -1,8 +1,84 @@
 import { useState } from "react";
 import Icon from "../../components/Icon.jsx";
+import { accountsApi } from "../../services/api.js";
 
-const documents=[{id:"statement",title:"Account statement",text:"Complete account activity for a selected period",icon:"receipt"},{id:"confirmation",title:"Account confirmation letter",text:"Official proof of your DanBank account details",icon:"settings"},{id:"summary",title:"Transaction summary",text:"Income and spending totals by category",icon:"chart"}];
-const history=[{name:"July 2026 statement",period:"01 Jul – 31 Jul 2026",size:"184 KB"},{name:"June 2026 statement",period:"01 Jun – 30 Jun 2026",size:"171 KB"},{name:"May 2026 statement",period:"01 May – 31 May 2026",size:"162 KB"}];
-export default function StatementsCenter({user,onClose}){const[document,setDocument]=useState(null);const[preview,setPreview]=useState(null);const[notice,setNotice]=useState("");const notify=t=>{setNotice(t);setTimeout(()=>setNotice(""),2500)};return <div className="statements-dialog" role="dialog" aria-modal="true"><button className="statements-backdrop" onClick={onClose}/><section className="statements-window"><header className="statements-header"><div><span>DOCUMENT CENTRE</span><h2>Statements and documents</h2><p>Generate, review, and securely download your account records.</p></div><button onClick={onClose}>×</button></header><main className="statements-main"><section className="document-hero"><div><span>PERSONAL SAVINGS · 6789</span><h3>Your financial records, always available</h3><p>All generated documents are protected and include a unique verification reference.</p></div><Icon name="receipt" size={34}/></section><div className="document-grid">{documents.map(item=><button key={item.id} onClick={()=>setDocument(item.id)}><span><Icon name={item.icon} size={20}/></span><div><strong>{item.title}</strong><small>{item.text}</small></div><Icon name="chevron" size={16}/></button>)}</div><div className="document-history-heading"><div><h3>Recent statements</h3><p>Previously generated monthly records.</p></div><button onClick={()=>setDocument("statement")}>Generate new</button></div><div className="document-history">{history.map(item=><article key={item.name}><span><Icon name="receipt" size={18}/></span><div><strong>{item.name}</strong><small>{item.period} · PDF · {item.size}</small></div><button onClick={()=>setPreview({type:"Account statement",period:item.period})}>Preview</button><button onClick={()=>{window.print();notify("Statement prepared for printing.")}} aria-label="Download">↓</button></article>)}</div><div className="document-security"><span>✓</span><p><strong>Secure and verifiable</strong>Every official DanBank document includes a reference that can be verified by authorized recipients.</p></div></main>{notice&&<button className="document-notice" onClick={()=>setNotice("")}>✓ {notice}<span>×</span></button>}</section>{document&&<GenerateDocument type={document} user={user} onClose={()=>setDocument(null)} onGenerated={data=>{setDocument(null);setPreview(data)}}/>}{preview&&<DocumentPreview data={preview} user={user} onClose={()=>setPreview(null)} notify={notify}/>}</div>}
-function GenerateDocument({type,user,onClose,onGenerated}){const[period,setPeriod]=useState("This month");const[start,setStart]=useState("");const[end,setEnd]=useState("");const[format,setFormat]=useState("PDF");const[error,setError]=useState("");const labels={statement:"Account statement",confirmation:"Account confirmation letter",summary:"Transaction summary"};const generate=e=>{e.preventDefault();if(period==="Custom"&&(!start||!end||start>end))return setError("Choose a valid start and end date.");onGenerated({type:labels[type],period:type==="confirmation"?"Issued today":period==="Custom"?`${start} – ${end}`:period,format})};return <div className="statement-layer"><button onClick={onClose}/><aside><header><div><span>GENERATE DOCUMENT</span><h3>{labels[type]}</h3></div><button onClick={onClose}>×</button></header><form onSubmit={generate}><div className="statement-account"><span>{(user.firstName||"D")[0]}{(user.lastName||"A")[0]}</span><p><strong>Personal Savings</strong>0123456789 · NGN</p><em>Selected</em></div>{type!=="confirmation"&&<><label>Statement period<select value={period} onChange={e=>setPeriod(e.target.value)}><option>This month</option><option>Last month</option><option>Last 3 months</option><option>Last 6 months</option><option>Custom</option></select></label>{period==="Custom"&&<div className="statement-dates"><label>Start date<input type="date" value={start} onChange={e=>setStart(e.target.value)}/></label><label>End date<input type="date" value={end} onChange={e=>setEnd(e.target.value)}/></label></div>}</>}<label>Document format<div className="format-options"><button type="button" className={format==="PDF"?"active":""} onClick={()=>setFormat("PDF")}><strong>PDF</strong><small>Best for sharing and printing</small></button><button type="button" className={format==="CSV"?"active":""} onClick={()=>setFormat("CSV")} disabled={type==="confirmation"}><strong>CSV</strong><small>Best for spreadsheets</small></button></div></label>{error&&<p className="payment-error">{error}</p>}<div className="statement-info"><span>i</span>Documents may take a few seconds to prepare. Large date ranges can take longer.</div><button className="statement-primary">Generate document</button></form></aside></div>}
-function DocumentPreview({data,user,onClose,notify}){return <div className="statement-layer preview-layer"><button onClick={onClose}/><aside><header><div><span>DOCUMENT PREVIEW</span><h3>{data.type}</h3></div><button onClick={onClose}>×</button></header><div className="paper-preview"><div className="paper-brand"><span className="brand-mark"><span/></span><strong>DanBank</strong><small>OFFICIAL ACCOUNT DOCUMENT</small></div><h4>{data.type}</h4><p>Generated for {user.firstName||"David"} {user.lastName||"Adekunle"}</p><dl><div><dt>Account name</dt><dd>{(user.firstName||"David").toUpperCase()} {(user.lastName||"Adekunle").toUpperCase()}</dd></div><div><dt>Account number</dt><dd>0123456789</dd></div><div><dt>Account type</dt><dd>Personal Savings</dd></div><div><dt>Period</dt><dd>{data.period}</dd></div><div><dt>Opening balance</dt><dd>₦2,098,820.75</dd></div><div><dt>Closing balance</dt><dd>₦2,580,420.75</dd></div></dl><div className="paper-footer"><span>DBDOC-{Date.now().toString().slice(-8)}</span><p>This document was generated electronically by DanBank.</p></div></div><button className="statement-primary" onClick={()=>{window.print();notify("Document prepared for download.")}}><Icon name="receipt" size={17}/> Download {data.format||"PDF"}</button></aside></div>}
+const money = new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN", minimumFractionDigits: 2 });
+const iso = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+function rangeFor(period, start, end) {
+  const today = new Date();
+  if (period === "This month") return { from: iso(new Date(today.getFullYear(), today.getMonth(), 1)), to: iso(today) };
+  if (period === "Last month") return { from: iso(new Date(today.getFullYear(), today.getMonth() - 1, 1)), to: iso(new Date(today.getFullYear(), today.getMonth(), 0)) };
+  if (period === "Last 3 months") return { from: iso(new Date(today.getFullYear(), today.getMonth() - 2, 1)), to: iso(today) };
+  return { from: start, to: end };
+}
+
+export default function StatementsCenter({ account, onClose }) {
+  const [period, setPeriod] = useState("This month");
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [statement, setStatement] = useState(null);
+
+  const request = () => {
+    const range = rangeFor(period, start, end);
+    if (!range.from || !range.to || range.from > range.to) { setError("Choose a valid start and end date."); return null; }
+    setError(""); return range;
+  };
+  const preview = async event => {
+    event.preventDefault();
+    const range = request(); if (!range) return;
+    setBusy(true);
+    try { setStatement(await accountsApi.statement(account.id, range)); }
+    catch (requestError) { setError(requestError.message); }
+    finally { setBusy(false); }
+  };
+  const download = async () => {
+    const range = request(); if (!range) return;
+    setBusy(true);
+    try {
+      const blob = await accountsApi.statementCsv(account.id, range);
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `statement-${account.number}-${range.from}-${range.to}.csv`;
+      link.click(); URL.revokeObjectURL(link.href);
+    } catch (requestError) { setError(requestError.message); }
+    finally { setBusy(false); }
+  };
+
+  return <div className="statements-dialog" role="dialog" aria-modal="true">
+    <button className="statements-backdrop" onClick={onClose} />
+    <section className="statements-window">
+      <header className="statements-header"><div><span>DOCUMENT CENTRE</span><h2>Account statement</h2><p>Review your activity and download it as a spreadsheet.</p></div><button onClick={onClose}>×</button></header>
+      <main className="statements-main">
+        <section className="document-hero"><div><span>{account.name.toUpperCase()} · {account.number}</span><h3>Your financial records, always available</h3><p>Opening and closing balances, every credit and debit, for any period up to a year.</p></div><Icon name="receipt" size={34} /></section>
+        <form className="statement-form" onSubmit={preview}>
+          <label>Statement period<select value={period} onChange={e => { setPeriod(e.target.value); setError(""); }}><option>This month</option><option>Last month</option><option>Last 3 months</option><option>Custom</option></select></label>
+          {period === "Custom" && <div className="statement-dates"><label>Start date<input type="date" value={start} onChange={e => setStart(e.target.value)} /></label><label>End date<input type="date" value={end} onChange={e => setEnd(e.target.value)} /></label></div>}
+          {error && <p className="payment-error">{error}</p>}
+          <div className="payment-actions"><button type="button" className="payment-secondary" onClick={download} disabled={busy}>Download CSV</button><button className="payment-primary" type="submit" disabled={busy}>{busy ? "Preparing…" : "Preview statement"}</button></div>
+        </form>
+        <div className="document-security"><span>✓</span><p><strong>Private to you</strong>Statements are generated on request and can only be opened by the account owner.</p></div>
+      </main>
+    </section>
+    {statement && <div className="statement-layer preview-layer"><button onClick={() => setStatement(null)} /><aside>
+      <header><div><span>STATEMENT PREVIEW</span><h3>{statement.from} to {statement.to}</h3></div><button onClick={() => setStatement(null)}>×</button></header>
+      <div className="paper-preview">
+        <div className="paper-brand"><span className="brand-mark"><span /></span><strong>DanBank</strong><small>ACCOUNT STATEMENT</small></div>
+        <h4>{statement.accountName}</h4><p>Account {statement.accountNumber}</p>
+        <dl>
+          <div><dt>Period</dt><dd>{statement.from} – {statement.to}</dd></div>
+          <div><dt>Opening balance</dt><dd>{money.format(statement.openingBalance)}</dd></div>
+          <div><dt>Total credits</dt><dd>{money.format(statement.totalCredits)}</dd></div>
+          <div><dt>Total debits</dt><dd>{money.format(statement.totalDebits)}</dd></div>
+          <div><dt>Closing balance</dt><dd>{money.format(statement.closingBalance)}</dd></div>
+        </dl>
+        <dl>{statement.lines.map(line => <div key={line.reference}><dt>{new Date(line.date).toLocaleDateString("en-NG", { day: "numeric", month: "short" })} · {line.description || line.type.replace(/_/g, " ").toLowerCase()}</dt><dd>{line.direction === "CREDIT" ? "+" : "−"} {money.format(line.amount)} <small>(bal {money.format(line.balance)})</small></dd></div>)}
+          {!statement.lines.length && <div><dt>No transactions in this period</dt><dd /></div>}</dl>
+        <div className="paper-footer"><span>{statement.accountNumber}</span><p>This statement was generated electronically by DanBank.</p></div>
+      </div>
+      <button className="statement-primary" onClick={() => window.print()}><Icon name="receipt" size={17} /> Print or save as PDF</button>
+    </aside></div>}
+  </div>;
+}

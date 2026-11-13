@@ -1,12 +1,13 @@
 package dan.bank.bank.user.dto;
 
-import jakarta.validation.constraints.Email;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.constraints.NotBlank;
 
+/** Log in with an email address or a phone number. The JSON field may be "identifier" or "email". */
 public record LoginRequest(
-        @NotBlank(message = "Email is required")
-        @Email(message = "Email address is invalid")
-        String email,
+        @JsonAlias("email")
+        @NotBlank(message = "Email or phone number is required")
+        String identifier,
         @NotBlank(message = "Password is required")
         String password) {
 }

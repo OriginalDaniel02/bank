@@ -20,7 +20,6 @@ public record UserRequest(
         )
         String phoneNumber,
 
-        @NotBlank(message = "Address is required")
         String address,
 
         @NotBlank(message = "Email is required")
@@ -29,8 +28,8 @@ public record UserRequest(
 
         @NotBlank(message = "Password is required")
         @Pattern(
-                regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@#$%&*!])\\S{8,64}$",
-                message = "Password must be 8–64 characters and contain uppercase, lowercase, number and special character"
+                regexp = PasswordRules.REGEX,
+                message = PasswordRules.MESSAGE
         )
         String password,
         @JsonFormat(pattern = "dd-MM-yyyy")

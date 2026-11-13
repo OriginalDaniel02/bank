@@ -77,4 +77,14 @@ class RealServerErrorStatusTests {
         int shortcut = get("/swagger-ui.html", null);
         org.junit.jupiter.api.Assertions.assertTrue(shortcut == 200 || shortcut == 302, "unexpected status " + shortcut);
     }
+
+    @Test
+    void unauthorizedBodyUsesTheStandardErrorShape() throws Exception {
+        HttpResponse<String> response = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/accounts")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(401, response.statusCode());
+        org.junit.jupiter.api.Assertions.assertTrue(response.body().contains("\"code\":\"UNAUTHORIZED\""), response.body());
+        org.junit.jupiter.api.Assertions.assertTrue(response.body().contains("\"message\""), response.body());
+    }
 }

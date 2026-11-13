@@ -10,6 +10,7 @@ Built with Spring Boot, PostgreSQL and Flyway.
 - [Tech Stack](#tech-stack)
 - [Getting Started](#getting-started)
 - [Configuration](#configuration)
+- [Frontend](#frontend)
 - [API Overview](#api-overview)
 - [Security Model](#security-model)
 - [Trying It in Swagger](#trying-it-in-swagger)
@@ -114,6 +115,25 @@ All settings come from environment variables (see `src/main/resources/applicatio
 | `kyc.face.provider` | No | Face-verification provider. Unset by default (the KYC endpoint returns 503). `stub` is for local development only. |
 
 Limits and fee tiers live in `application.properties` (`bank.limits.*`, `bank.fees.*`). Unverified users use the stricter `bank.limits.tier0-*` values. The default values are placeholders. Set real ones before going live.
+
+## Frontend
+
+`frontend/` is a React 19 + Vite web app (sign-in, dashboard, transfers, beneficiaries, notifications, statements, history, accounts, security and identity verification), wired to this API.
+
+```bash
+cd frontend
+npm install
+npm run dev        # http://localhost:5173
+```
+
+In development Vite forwards `/api` to the backend at `http://localhost:8080` (set `BACKEND_URL` to change it), so there is nothing to configure and no CORS to worry about. To call a deployed API directly, set `VITE_API_BASE_URL` (see `frontend/.env.example`) and add the site's address to `CORS_ALLOWED_ORIGINS` on the backend.
+
+Notes:
+- Tokens are kept in memory only. Refreshing the page signs you out, and an expired access token is refreshed automatically.
+- **Working with real data:** sign-up, sign-in, dashboard, send money (PIN, fee, limits, receipt), beneficiaries, notifications, history, statements (preview and CSV), accounts (open and close), PIN setup, limits and identity verification.
+- **Not built yet** (shown as "coming soon" for real accounts): cards, savings goals, scheduled payments, bill payments and airtime, financial insights, password change in the app, card top-up.
+- For local testing of the identity check, start the backend with `KYC_FACE_PROVIDER=stub`. The stub approves any photo and must never be used in production.
+- New accounts start with zero balance. To fund one while testing, make a user an admin (`ADMIN_EMAIL`) and call `POST /accounts/{id}/credit`.
 
 ## API Overview
 
@@ -227,8 +247,8 @@ Amounts must be at least `0.01` and have at most 2 decimal places.
 ## Trying It in Swagger
 
 1. Start the app and open `http://localhost:8080/swagger-ui/index.html`.
-2. **Sign up:** `POST /api/v1/users/signUp`. The password needs 8 to 64 characters with upper case, lower case, a digit and one of `@#$%&*!`. The date format is `dd-MM-yyyy`.
-3. **Log in:** `POST /api/v1/auth/login`, then copy the `accessToken`.
+2. **Sign up:** `POST /api/v1/auth/signup` with `{firstName, lastName, email, phoneNumber, password, termsAccepted}`. The password needs 12 to 64 characters with upper case, lower case, a digit and a symbol. A first savings account is created for you.
+3. **Log in:** `POST /api/v1/auth/login` with `{identifier, password}` (the identifier is your email or phone number), then copy the `accessToken`.
 4. Click **Authorize** (top right), paste the token **without** the word `Bearer`, and confirm.
 5. Open an account with `POST /accounts/user/{userId}` (your own id), and set a PIN with `POST /users/me/pin`.
 6. To fund an account you need an admin (`ADMIN_EMAIL`). Log in as the admin, authorize with that token, and call `POST /accounts/{id}/credit`.
@@ -288,7 +308,7 @@ Tests run against an in-memory H2 database in PostgreSQL mode, with the real Fly
 - Email and SMS delivery for notifications, and PDF statements
 - Bill payments (airtime, data, electricity)
 - Double-entry ledger and audit log
-- CI pipeline and a frontend
+- CI pipeline, and frontend tests (the app is currently checked by end-to-end browser runs, not committed tests)
 
 ## License
 

@@ -173,3 +173,14 @@ html[data-theme="dark"] .notification-icon.success{background:#12372b}html[data-
 @media(max-width:600px){.service-grid{grid-template-columns:1fr;gap:8px}.service-grid button{min-height:72px;padding:13px 14px}.service-grid button>small{white-space:normal}}
 @media(max-width:720px){.notifications-dialog,.security-dialog{padding:0;align-items:end}.notifications-window,.security-window{width:100%;height:94vh;border-radius:21px 21px 0 0}.notification-detail{width:100%}.security-window{display:block;overflow-y:auto}.security-nav{padding:18px;border-right:0}.profile-summary{grid-template-columns:45px 1fr auto;justify-items:start;text-align:left}.profile-summary>span{grid-row:1/4;width:42px;height:42px}.profile-summary strong,.profile-summary small,.profile-summary em{margin:0 0 0 10px}.security-nav nav{display:flex;overflow-x:auto;margin-top:14px}.security-nav nav button{white-space:nowrap}.security-nav nav button>.icon:last-child{display:none}.security-signout{display:none}.security-main{overflow:visible;padding:22px 18px}.profile-fields{grid-template-columns:1fr}.profile-fields label.wide{grid-column:auto}}
 @media(max-width:480px){.notifications-header,.notification-tools{padding-left:18px;padding-right:18px}.notification-list{padding-inline:8px}.notification-tools{overflow-x:auto}.notification-tools>button{display:none}.notification-copy p{display:-webkit-box;overflow:hidden;-webkit-line-clamp:2;-webkit-box-orient:vertical}}
+
+/* The theme button used to sit in the top-right corner, on top of the close (×) button of every slide-in panel.
+   Keep it in the bottom-right corner instead, with its menu opening upwards. */
+.appearance-control{top:auto;bottom:20px;right:19px}
+.appearance-menu{top:auto;bottom:49px}
+.app-toast{bottom:76px}
+@media(max-width:800px){
+  .appearance-control{top:auto;bottom:88px;right:16px}
+  .appearance-menu{top:auto;bottom:128px}
+  .app-toast{bottom:136px}
+}

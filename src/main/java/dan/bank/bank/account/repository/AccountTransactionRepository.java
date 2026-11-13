@@ -15,6 +15,9 @@ public interface AccountTransactionRepository extends JpaRepository<AccountTrans
     @Query("select t from AccountTransaction t where t.account.id = :accountId and t.createdAt >= :from and t.createdAt < :to order by t.createdAt asc, t.id asc")
     java.util.List<AccountTransaction> findInRange(@Param("accountId") Long accountId, @Param("from") java.time.Instant from, @Param("to") java.time.Instant to);
 
+    @Query("select t.type, sum(t.amount) from AccountTransaction t where t.account.id = :accountId and t.createdAt >= :from and t.createdAt < :to group by t.type")
+    java.util.List<Object[]> sumByTypeBetween(@Param("accountId") Long accountId, @Param("from") java.time.Instant from, @Param("to") java.time.Instant to);
+
     @Query("select t.type, sum(t.amount) from AccountTransaction t where t.account.id = :accountId and t.createdAt >= :since group by t.type")
     java.util.List<Object[]> sumByTypeSince(@Param("accountId") Long accountId, @Param("since") java.time.Instant since);
 

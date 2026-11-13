@@ -6,5 +6,7 @@ public record AuthResponse(
         String accessToken,
         String refreshToken,
         String tokenType,
-        Instant accessTokenExpiresAt
+        Instant accessTokenExpiresAt,
+        long expiresInSeconds,
+        UserSummary user
 ) { }

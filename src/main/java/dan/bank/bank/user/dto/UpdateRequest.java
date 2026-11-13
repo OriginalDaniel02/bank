@@ -23,8 +23,8 @@ public record UpdateRequest(
         String email,
         // Same rule as sign-up, so a password can't be weakened through an update.
         @Pattern(
-                regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@#$%&*!])\\S{8,64}$",
-                message = "Password must be 8–64 characters and contain uppercase, lowercase, number and special character"
+                regexp = PasswordRules.REGEX,
+                message = PasswordRules.MESSAGE
         )
         String password,
 
