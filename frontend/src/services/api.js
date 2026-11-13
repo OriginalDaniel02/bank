@@ -131,6 +131,19 @@ export const depositsApi = {
   status: reference => request(`/deposits/${encodeURIComponent(reference)}`),
 };
 
+export const savingsApi = {
+  list: () => request("/savings"),
+  create: goal => request("/savings", json("POST", goal)),
+  deposit: (id, accountId, amount) => request(`/savings/${id}/deposit`, json("POST", { accountId, amount })),
+  withdraw: (id, accountId, amount, pin) => request(`/savings/${id}/withdraw`, { ...json("POST", { accountId, amount }), headers: { "X-Transaction-Pin": pin } }),
+  close: (id, accountId, pin) => request(`/savings/${id}/close`, { ...json("POST", { accountId }), headers: { "X-Transaction-Pin": pin } }),
+  changeTarget: (id, targetAmount) => request(`/savings/${id}/target`, json("PUT", { targetAmount })),
+};
+
+export const insightsApi = {
+  get: accountId => request(`/insights${query({ accountId })}`),
+};
+
 export const beneficiariesApi = {
   list: () => request("/beneficiaries"),
   add: (accountNumber, nickname) => request("/beneficiaries", json("POST", { accountNumber, nickname })),
@@ -145,6 +158,12 @@ export const notificationsApi = {
 };
 
 export const securityApi = {
+  /** Returns a fresh token pair: every other device is signed out, this one stays signed in. */
+  changePassword: async (currentPassword, newPassword) => {
+    const result = await request("/users/me/password", json("POST", { currentPassword, newPassword }));
+    tokens = { accessToken: result.accessToken, refreshToken: result.refreshToken };
+    return result;
+  },
   setPin: (pin, password) => request("/users/me/pin", json("POST", { pin, password })),
   updateProfile: (userId, changes) => request(`/users/updateUser/${userId}`, json("PUT", changes)),
 };

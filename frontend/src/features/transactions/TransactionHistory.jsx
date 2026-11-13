@@ -12,6 +12,8 @@ const kinds = {
   FEE_INCOME: { title: "Fee income", category: "Fees", icon: "arrowDown", color: "green", income: true },
   DEBIT: { title: "Withdrawal", category: "Withdrawal", icon: "arrowUp", color: "orange", income: false },
   TRANSFER_OUT: { title: "Transfer sent", category: "Transfers", icon: "send", color: "blue", income: false },
+  SAVINGS_OUT: { title: "Moved to savings", category: "Savings", icon: "chart", color: "purple", income: false },
+  SAVINGS_IN: { title: "Back from savings", category: "Savings", icon: "chart", color: "green", income: true },
   FEE: { title: "Transfer fee", category: "Fees", icon: "receipt", color: "purple", income: false },
 };
 const dayLabel = date => {
@@ -20,7 +22,7 @@ const dayLabel = date => {
   return diff === 0 ? "Today" : diff === 1 ? "Yesterday" : date.toLocaleDateString("en-NG", { day: "numeric", month: "short", year: "numeric" });
 };
 const toRecord = item => {
-  const kind = kinds[item.type] || kinds.CREDIT;
+  const kind = kinds[item.type] || { title: item.type.replace(/_/g, " ").toLowerCase().replace(/^./, c => c.toUpperCase()), category: "Other", icon: "receipt", color: "purple", income: false };
   const created = new Date(item.createdAt);
   const id = item.reference.replace(/-(OUT|IN|FEE|FEE-IN)$/, "").replace(/-/g, "");
   return {

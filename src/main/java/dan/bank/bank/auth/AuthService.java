@@ -74,6 +74,25 @@ public class AuthService {
         return UserSummary.from(userRepository.getReferenceById(created.id()));
     }
 
+    /**
+     * Changes the password, signs the user out everywhere else (all refresh tokens are revoked) and returns a fresh
+     * token pair so the device that made the change stays signed in.
+     */
+    @Transactional
+    public AuthResponse changePassword(long userId, String currentPassword, String newPassword) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Your current password is incorrect");
+        }
+        if (passwordEncoder.matches(newPassword, user.getPassword())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose a password you have not used before");
+        }
+        user.setPassword(passwordEncoder.encode(newPassword));
+        refreshTokenRepository.revokeAllForUser(userId);
+        return createTokenPair(user);
+    }
+
     @Transactional
     public AuthResponse refresh(String rawRefreshToken) {
         RefreshToken storedToken = refreshTokenRepository.findByTokenHash(hashToken(rawRefreshToken))

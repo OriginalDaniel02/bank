@@ -62,6 +62,7 @@ public class DashboardService {
         BigDecimal moneyIn = BigDecimal.ZERO;
         BigDecimal moneyOut = BigDecimal.ZERO;
         for (Object[] row : transactionRepository.sumByTypeBetween(selected.getId(), monthStart, tomorrow)) {
+            if (isOwnSavingsMove((TransactionType) row[0])) continue;
             BigDecimal signed = signed((TransactionType) row[0], (BigDecimal) row[1]);
             if (signed.signum() > 0) moneyIn = moneyIn.add(signed); else moneyOut = moneyOut.add(signed.negate());
         }
@@ -79,7 +80,7 @@ public class DashboardService {
         Map<LocalDate, BigDecimal> perDay = new TreeMap<>();
         for (int i = 0; i < SPENDING_DAYS; i++) perDay.put(first.plusDays(i), BigDecimal.ZERO);
         for (AccountTransaction t : transactionRepository.findInRange(accountId, first.atStartOfDay(zone).toInstant(), tomorrow)) {
-            if (signed(t.getType(), t.getAmount()).signum() < 0) {
+            if (!isOwnSavingsMove(t.getType()) && signed(t.getType(), t.getAmount()).signum() < 0) {
                 perDay.merge(t.getCreatedAt().atZone(zone).toLocalDate(), t.getAmount(), BigDecimal::add);
             }
         }
@@ -95,10 +96,15 @@ public class DashboardService {
         return week;
     }
 
+    /** Money moved between your account and your own savings goals is neither income nor spending. */
+    private static boolean isOwnSavingsMove(TransactionType type) {
+        return type == TransactionType.SAVINGS_OUT || type == TransactionType.SAVINGS_IN;
+    }
+
     private static BigDecimal signed(TransactionType type, BigDecimal amount) {
         return switch (type) {
-            case CREDIT, TRANSFER_IN, FEE_INCOME -> amount;
-            case DEBIT, TRANSFER_OUT, FEE -> amount.negate();
+            case CREDIT, TRANSFER_IN, FEE_INCOME, SAVINGS_IN -> amount;
+            case DEBIT, TRANSFER_OUT, FEE, SAVINGS_OUT -> amount.negate();
         };
     }
 
