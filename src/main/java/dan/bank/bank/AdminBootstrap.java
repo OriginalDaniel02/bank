@@ -1,7 +1,7 @@
 package dan.bank.bank;
 
-import dan.bank.bank.User.model.Role;
-import dan.bank.bank.User.repository.UserRepository;
+import dan.bank.bank.user.model.Role;
+import dan.bank.bank.user.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
