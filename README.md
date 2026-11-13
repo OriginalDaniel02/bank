@@ -32,6 +32,9 @@ Built with Spring Boot, PostgreSQL and Flyway.
 - KYC with face verification (pluggable provider) and tier-based limits: unverified users get stricter limits
 - Paged transaction history, plus statements with date and type filters, opening and closing balances, and CSV export
 - Saved beneficiaries (recipients)
+- Savings goals (flexible or locked until a date), PIN-protected withdrawals
+- Financial insights from your real transactions (monthly money in and out, where it went)
+- Change password (other devices are signed out)
 - Card deposits through Paystack (signed webhook, verified server-side, credited exactly once)
 - In-app notifications for debits, credits and KYC results
 - Roles (`USER`, `ADMIN`); only admins can credit or debit accounts directly
@@ -135,8 +138,8 @@ In development Vite forwards `/api` to the backend at `http://localhost:8080` (s
 
 Notes:
 - Tokens are kept in memory only. Refreshing the page signs you out, and an expired access token is refreshed automatically.
-- **Working with real data:** sign-up, sign-in, dashboard, add money by card (Paystack), send money (PIN, fee, limits, receipt), beneficiaries, notifications, history, statements (preview and CSV), accounts (open and close), PIN setup, limits and identity verification.
-- **Not built yet** (shown as "coming soon" for real accounts): cards, savings goals, scheduled payments, bill payments and airtime, financial insights, password change in the app.
+- **Working with real data:** sign-up, sign-in, dashboard, add money by card (Paystack), send money (PIN, fee, limits, receipt), beneficiaries, notifications, history, statements (preview and CSV), accounts (open and close), PIN setup and password change, limits, identity verification, **savings goals** and **financial insights**.
+- **Not built yet** (shown as "coming soon" for real accounts): cards (needs a card issuer), bill payments and airtime (needs a provider such as VTpass), scheduled and recurring payments, automatic savings, and support chat. **Forgotten-password reset** needs an email or SMS provider, so that page says it isn't available yet instead of pretending.
 - For local testing of the identity check, start the backend with `KYC_FACE_PROVIDER=stub`. The stub approves any photo and must never be used in production.
 - New accounts start with zero balance. To fund one while testing, make a user an admin (`ADMIN_EMAIL`) and call `POST /accounts/{id}/credit`.
 
@@ -205,6 +208,26 @@ All endpoints are under `/api/v1`. Everything except sign-up, `/auth/**` and the
 | POST | `/notifications/read-all` | Mark all as read |
 
 Debit and credit alerts are created after each transfer or admin funding. They are best effort: a notification failure never fails or repeats a transfer.
+
+### Savings goals
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/savings` | Your active goals and the total saved |
+| POST | `/savings` | Create a goal: `{name, type: FLEXIBLE or LOCKED, targetAmount, deadline?}` (a locked goal needs a future `deadline`) |
+| POST | `/savings/{id}/deposit` | Move money from an account into the goal: `{accountId, amount}` (min ₦100) |
+| POST | `/savings/{id}/withdraw` | Move money back (needs `X-Transaction-Pin`; refused while a locked goal is locked) |
+| POST | `/savings/{id}/close` | Return what is saved and close the goal (needs `X-Transaction-Pin`) |
+| PUT | `/savings/{id}/target` | Change the target |
+
+Saved money leaves the account's balance (a `SAVINGS_OUT` ledger entry) and returns on withdrawal (`SAVINGS_IN`), so balances and statements always add up. Moves to and from your own savings are not counted as spending or income on the dashboard or insights.
+
+### Insights and password
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/insights?accountId=` | Six months of money in and out, this month's breakdown by type, the biggest payment, and how much went to savings |
+| POST | `/users/me/password` | `{currentPassword, newPassword}`. Revokes every other session and returns a fresh token pair for this one |
 
 ### Deposits
 

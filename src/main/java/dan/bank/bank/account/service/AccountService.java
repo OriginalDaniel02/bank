@@ -259,6 +259,25 @@ public class AccountService {
         return new AccountResponse<>("Account updated", toDto(account));
     }
 
+    /** Moves money out of an account into one of the owner's own pots (e.g. a savings goal). */
+    @Transactional
+    public void moveOut(long accountId, BigDecimal amount, TransactionType type, String description, String reference) {
+        Account account = findActiveAccountWithLock(accountId);
+        BigDecimal value = normalizeMoney(amount);
+        ensureSufficientFunds(account, value);
+        account.setBalance(account.getBalance().subtract(value));
+        recordTransaction(account, type, value, description, reference);
+    }
+
+    /** Moves money back into an account from one of the owner's own pots. */
+    @Transactional
+    public void moveIn(long accountId, BigDecimal amount, TransactionType type, String description, String reference) {
+        Account account = findActiveAccountWithLock(accountId);
+        BigDecimal value = normalizeMoney(amount);
+        account.setBalance(account.getBalance().add(value));
+        recordTransaction(account, type, value, description, reference);
+    }
+
     private Account findActiveAccountWithLock(long accountId) {
         Account account = accountRepository.findWithLockById(accountId)
                 .orElseThrow(() -> notFound("Account not found"));

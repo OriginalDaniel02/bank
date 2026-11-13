@@ -92,8 +92,8 @@ public class StatementService {
 
     static BigDecimal signed(TransactionType type, BigDecimal amount) {
         return switch (type) {
-            case CREDIT, TRANSFER_IN, FEE_INCOME -> amount;
-            case DEBIT, TRANSFER_OUT, FEE -> amount.negate();
+            case CREDIT, TRANSFER_IN, FEE_INCOME, SAVINGS_IN -> amount;
+            case DEBIT, TRANSFER_OUT, FEE, SAVINGS_OUT -> amount.negate();
         };
     }
 

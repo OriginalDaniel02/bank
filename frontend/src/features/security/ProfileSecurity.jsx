@@ -7,6 +7,7 @@ const money = new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN
 export default function ProfileSecurity({ user, kycTier, pinSet, onPinSet, onClose, onSignOut, onVerify }) {
   const [section, setSection] = useState("Profile");
   const [pinDialog, setPinDialog] = useState(false);
+  const [passwordDialog, setPasswordDialog] = useState(false);
   const [notice, setNotice] = useState("");
   const notify = text => { setNotice(text); setTimeout(() => setNotice(""), 3000); };
   const initials = `${(user.firstName || "?")[0]}${(user.lastName || "?")[0]}`.toUpperCase();
@@ -27,13 +28,14 @@ export default function ProfileSecurity({ user, kycTier, pinSet, onPinSet, onClo
         {section === "Security" && <section className="settings-panel">
           <div className="settings-intro"><h3>Security and access</h3><p>Control how you authorize sensitive actions.</p></div>
           <SettingRow icon="card" title="Transaction PIN" text={pinSet ? "Required for payments and transfers" : "Not set. You need a PIN before you can send money"} action={pinSet ? "Change" : "Set up"} onClick={() => setPinDialog(true)} />
-          <SettingRow icon="settings" title="Password" text="Changing your password in the app is coming soon" action="Soon" onClick={() => notify("Password changes are coming soon.")} />
+          <SettingRow icon="settings" title="Password" text="Change it any time. Other devices are signed out" action="Change" onClick={() => setPasswordDialog(true)} />
           <div className="security-health"><div><span>{pinSet ? "✓" : "!"}</span><p><strong>{pinSet ? "Transaction PIN is active" : "Set up your transaction PIN"}</strong>{pinSet ? "Every payment needs your PIN. Five wrong attempts lock it for 15 minutes." : "Without a PIN you cannot send money."}</p></div><b>{pinSet ? "100%" : "50%"}</b></div>
         </section>}
         {section === "Limits" && <LimitsPanel verified={verified} onVerify={() => { onClose(); onVerify?.(); }} />}
       </main>
       {notice && <button className="security-notice" onClick={() => setNotice("")}>✓ {notice}<span>×</span></button>}
     </section>
+    {passwordDialog && <PasswordDialog onClose={() => setPasswordDialog(false)} onSaved={() => { setPasswordDialog(false); notify("Password changed. Other devices were signed out."); }} />}
     {pinDialog && <PinDialog hasPin={pinSet} onClose={() => setPinDialog(false)} onSaved={() => { setPinDialog(false); onPinSet?.(); notify("Transaction PIN saved securely."); }} />}
   </div>;
 }
@@ -113,6 +115,35 @@ function PinDialog({ hasPin, onClose, onSaved }) {
       <label>Account password<input type="password" autoComplete="current-password" value={fields.password} onChange={set("password", false)} /></label>
       <label>New PIN<input type="password" inputMode="numeric" autoComplete="off" value={fields.pin} onChange={set("pin", true)} /></label>
       <label>Confirm new PIN<input type="password" inputMode="numeric" autoComplete="off" value={fields.confirm} onChange={set("confirm", true)} /></label>
+      {error && <p className="payment-error">{error}</p>}
+      <div><button type="button" onClick={onClose}>Cancel</button><button type="submit" disabled={saving}>{saving ? "Saving…" : "Save securely"}</button></div>
+    </form>
+  </div>;
+}
+
+function PasswordDialog({ onClose, onSaved }) {
+  const [fields, setFields] = useState({ current: "", next: "", confirm: "" });
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const set = name => event => { setFields(v => ({ ...v, [name]: event.target.value })); setError(""); };
+
+  const submit = async event => {
+    event.preventDefault();
+    if (!fields.current) return setError("Enter your current password.");
+    if (fields.next.length < 12) return setError("Your new password must be at least 12 characters.");
+    if (fields.next !== fields.confirm) return setError("The new passwords don’t match.");
+    setSaving(true);
+    try { await securityApi.changePassword(fields.current, fields.next); onSaved(); }
+    catch (requestError) { setError(requestError.status === 403 ? "Your current password is incorrect." : Object.values(requestError.fields || {})[0] || requestError.message); }
+    finally { setSaving(false); }
+  };
+
+  return <div className="credential-layer"><button onClick={onClose} aria-label="Close" />
+    <form onSubmit={submit}>
+      <span>✓</span><h3>Change password</h3><p>Use 12 or more characters with upper and lower case, a number and a symbol. You’ll stay signed in here; other devices are signed out.</p>
+      <label>Current password<input type="password" autoComplete="current-password" value={fields.current} onChange={set("current")} /></label>
+      <label>New password<input type="password" autoComplete="new-password" value={fields.next} onChange={set("next")} /></label>
+      <label>Confirm new password<input type="password" autoComplete="new-password" value={fields.confirm} onChange={set("confirm")} /></label>
       {error && <p className="payment-error">{error}</p>}
       <div><button type="button" onClick={onClose}>Cancel</button><button type="submit" disabled={saving}>{saving ? "Saving…" : "Save securely"}</button></div>
     </form>
