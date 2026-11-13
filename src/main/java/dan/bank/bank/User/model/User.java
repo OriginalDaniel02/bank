@@ -42,6 +42,10 @@ public class User {
     /** BCrypt hash of the 4-digit transaction PIN; null until the user sets one. */
     private String transactionPinHash;
 
+    /** 0 = unverified, 1 = face verified. Higher tiers raise transfer limits. */
+    @Column(nullable = false)
+    private int kycTier;
+
     @Column(nullable = false)
     private int pinFailedAttempts;
 

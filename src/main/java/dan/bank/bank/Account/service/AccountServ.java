@@ -172,10 +172,6 @@ public class AccountServ {
         }
 
         BigDecimal amount = normalizeMoney(request.amount());
-        if (amount.compareTo(policy.perTransferMax()) > 0) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
-                    "Amount exceeds the per-transfer limit of " + policy.perTransferMax().toPlainString());
-        }
         BigDecimal fee = policy.feeFor(amount);
         Long incomeAccountId = fee.signum() > 0
                 ? accountRepository.findByAccountNumber(policy.incomeAccountNumber())
@@ -196,10 +192,18 @@ public class AccountServ {
         Account sourceAccount = locked.get(request.fromAccountId());
         Account destinationAccount = locked.get(request.toAccountId());
 
+        int kycTier = sourceAccount.getUser().getKycTier();
+        if (amount.compareTo(policy.perTransferMaxFor(kycTier)) > 0) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                    "Amount exceeds your per-transfer limit of " + policy.perTransferMaxFor(kycTier).toPlainString()
+                            + (kycTier < 1 ? ". Verify your identity to raise it" : ""));
+        }
+
         java.time.Instant startOfDay = java.time.LocalDate.now(policy.zone()).atStartOfDay(policy.zone()).toInstant();
         BigDecimal sentToday = transactionRepository.sumSince(sourceAccount.getId(), TransactionType.TRANSFER_OUT, startOfDay);
-        if (sentToday != null && sentToday.add(amount).compareTo(policy.dailyMax()) > 0) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Daily transfer limit exceeded");
+        if (sentToday != null && sentToday.add(amount).compareTo(policy.dailyMaxFor(kycTier)) > 0) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                    "Daily transfer limit exceeded" + (kycTier < 1 ? ". Verify your identity to raise it" : ""));
         }
 
         ensureSufficientFunds(sourceAccount, amount.add(fee));

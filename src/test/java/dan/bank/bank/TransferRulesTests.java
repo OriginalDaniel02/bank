@@ -63,7 +63,8 @@ class TransferRulesTests {
     private static TransferPolicy policy(String perTransfer, String daily, String incomeAccount) {
         return new TransferPolicy(new BigDecimal(perTransfer), new BigDecimal(daily), "UTC", incomeAccount,
                 new BigDecimal("100.00"), new BigDecimal("10.00"), new BigDecimal("1000.00"),
-                new BigDecimal("25.00"), new BigDecimal("50.00"));
+                new BigDecimal("25.00"), new BigDecimal("50.00"),
+                new BigDecimal("1000000000.00"), new BigDecimal("1000000000.00"));
     }
 
     @Test
