@@ -17,7 +17,12 @@ public class StubFaceVerificationProvider implements FaceVerificationProvider {
     }
 
     @Override
-    public Result verify(long userId, byte[] selfieImage) {
+    public Result authenticate(long userId, FaceImages images) {
+        return new Result(true, "stub-auth-" + userId, "Stub provider: no real face comparison performed");
+    }
+
+    @Override
+    public Result verify(long userId, FaceImages images) {
         return new Result(true, "stub-" + userId, "Stub provider: no real face check performed");
     }
 }

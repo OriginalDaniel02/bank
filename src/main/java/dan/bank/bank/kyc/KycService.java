@@ -31,16 +31,21 @@ public class KycService {
     }
 
     @Transactional
-    public KycStatusView verifyFace(long userId, byte[] selfie) {
+    public KycStatusView verifyFace(long userId, FaceImages images) {
         FaceVerificationProvider provider = providerHolder.getIfAvailable();
         if (provider == null) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Face verification is not configured");
         }
-        validateImage(selfie);
+        validateImages(images);
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
-        FaceVerificationProvider.Result result = provider.verify(userId, selfie);
+        FaceVerificationProvider.Result result;
+        try {
+            result = provider.verify(userId, images);
+        } catch (FaceVerificationProvider.UnavailableException e) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Identity verification isn't available right now. Please try again later");
+        }
 
         KycStatus status = result.approved() ? KycStatus.APPROVED : KycStatus.REJECTED;
         verificationRepository.save(new KycVerification(
@@ -65,7 +70,13 @@ public class KycService {
     }
 
     /** Accepts only real JPEG/PNG data (checked by magic bytes, not the client-supplied type). */
-    static void validateImage(byte[] data) {
+    /** Checks every captured image really is a JPEG or PNG of a sensible size. */
+    public static void validateImages(FaceImages images) {
+        validateImage(images.selfie());
+        images.liveness().forEach(KycService::validateImage);
+    }
+
+    public static void validateImage(byte[] data) {
         if (data == null || data.length == 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Selfie image is required");
         }

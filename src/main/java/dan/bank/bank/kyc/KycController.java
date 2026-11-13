@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/kyc")
@@ -24,9 +25,10 @@ public class KycController {
     }
 
     @PostMapping(value = "/face", consumes = "multipart/form-data")
-    public ResponseEntity<KycService.KycStatusView> verifyFace(@RequestParam("selfie") MultipartFile selfie)
-            throws IOException {
-        return ResponseEntity.ok(kycService.verifyFace(currentUser.id(), selfie.getBytes()));
+    public ResponseEntity<KycService.KycStatusView> verifyFace(
+            @RequestParam("selfie") MultipartFile selfie,
+            @RequestParam(value = "liveness", required = false) List<MultipartFile> liveness) throws IOException {
+        return ResponseEntity.ok(kycService.verifyFace(currentUser.id(), FaceImages.of(selfie, liveness)));
     }
 
     @GetMapping("/status")

@@ -78,6 +78,12 @@
 			<optional>true</optional>
 		</dependency>
 
+		<!-- Smile ID's official Java library: SmartSelfie registration and authentication (face match + liveness) -->
+		<dependency>
+			<groupId>com.smileidentity</groupId>
+			<artifactId>smile-identity-core</artifactId>
+			<version>2.1.8</version>
+		</dependency>
 		<dependency>
 			<groupId>org.springdoc</groupId>
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>

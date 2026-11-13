@@ -3,16 +3,18 @@ import Brand from "../../components/Brand.jsx";
 import Icon from "../../components/Icon.jsx";
 import AccountRecovery from "../recovery/AccountRecovery.jsx";
 import { authApi } from "../../services/api.js";
+import FaceCapture from "../../components/FaceCapture.jsx";
 
 const initialForm = { firstName: "", lastName: "", email: "", phone: "", password: "", consent: false };
 
-export default function AuthScreen({ onAuthenticated }) {
+export default function AuthScreen({ onAuthenticated, notice = "" }) {
   const [mode, setMode] = useState("login");
   const [step, setStep] = useState(1);
   const [showPassword, setShowPassword] = useState(false);
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [challenge, setChallenge] = useState(null);
 
   const update = ({ target }) => {
     setForm(value => ({ ...value, [target.name]: target.type === "checkbox" ? target.checked : target.value }));
@@ -20,7 +22,7 @@ export default function AuthScreen({ onAuthenticated }) {
   };
   const enter = session => onAuthenticated({ ...session.user, accessToken: session.accessToken, refreshToken: session.refreshToken, expiresInSeconds: session.expiresInSeconds });
   const demo = () => onAuthenticated({ firstName: "David", lastName: "Adekunle", email: "demo@danbank.test", demo: true });
-  const login = async event => { event.preventDefault(); if (!form.email || !form.password) return setError("Enter your email and password to continue."); setLoading(true); try { enter(await authApi.login(form.email, form.password)); } catch (requestError) { setError(requestError.status === 401 ? "The email or password you entered is incorrect." : requestError.message); } finally { setLoading(false); } };
+  const login = async event => { event.preventDefault(); if (!form.email || !form.password) return setError("Enter your email and password to continue."); setLoading(true); try { const result = await authApi.login(form.email, form.password); if (result.status === "DEVICE_VERIFICATION_REQUIRED") setChallenge(result); else enter(result); } catch (requestError) { setError(requestError.status === 401 ? "The email or password you entered is incorrect." : requestError.message); } finally { setLoading(false); } };
   const register = async event => {
     event.preventDefault();
     if (step === 1 && (!form.firstName || !form.lastName || !form.email)) return setError("Complete all personal details to continue.");
@@ -34,6 +36,15 @@ export default function AuthScreen({ onAuthenticated }) {
   };
   const changeMode = value => { setMode(value); setStep(1); setError(""); };
 
+  const verifyDevice = async faces => {
+    setLoading(true); setError("");
+    try { enter(await authApi.verifyDevice(challenge.challengeToken, faces)); }
+    catch (requestError) {
+      if (requestError.status === 401) { setChallenge(null); setError("That verification expired. Please sign in again."); }
+      else setError(requestError.message);
+    } finally { setLoading(false); }
+  };
+
   if (mode === "recovery") return <AccountRecovery onBack={() => changeMode("login")} />;
 
   return <main className="auth-page">
@@ -42,8 +53,13 @@ export default function AuthScreen({ onAuthenticated }) {
       <div className="story-copy"><span className="secure-pill">Secure digital banking</span><h1>Bank confidently.<br/><em>Live freely.</em></h1><p>Everything you need to manage, move, and grow your money—beautifully simple and protected around the clock.</p><div className="trust-row"><span>256-bit encryption</span><span>Protected access</span><span>24/7 support</span></div></div>
       <div className="story-orbit"><i/><i/><i/></div><small className="sandbox-note">DANBANK SANDBOX • PROTOTYPE ENVIRONMENT</small>
     </section>
-    <section className="auth-panel"><div className="auth-card"><Brand mobile />
-      {mode === "login" ? <LoginForm form={form} update={update} error={error} loading={loading} showPassword={showPassword} setShowPassword={setShowPassword} onSubmit={login} onDemo={demo} onRegister={() => changeMode("register")} onRecover={() => changeMode("recovery")} />
+    <section className="auth-panel"><div className="auth-card"><Brand mobile />{notice && !challenge && <p className="form-error" role="status">{notice}</p>}
+      {challenge ? <><div className="auth-heading"><span>NEW DEVICE</span><h2>Verify it’s you</h2><p>{challenge.message} We also sent an alert to your account.</p></div>
+        <FaceCapture onCapture={verifyDevice} disabled={loading} label="Start face check" />
+        {loading && <p className="payment-hint">Checking…</p>}
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <button className="demo-link" type="button" onClick={() => { setChallenge(null); setError(""); }}>Cancel and go back</button></>
+      : mode === "login" ? <LoginForm form={form} update={update} error={error} loading={loading} showPassword={showPassword} setShowPassword={setShowPassword} onSubmit={login} onDemo={demo} onRegister={() => changeMode("register")} onRecover={() => changeMode("recovery")} />
       : <RegisterForm form={form} update={update} error={error} loading={loading} step={step} setStep={setStep} showPassword={showPassword} setShowPassword={setShowPassword} onSubmit={register} onLogin={() => changeMode("login")} />}
     </div><p className="auth-legal">Protected by industry-standard encryption. Never share your password or transaction PIN.</p></section>
   </main>;

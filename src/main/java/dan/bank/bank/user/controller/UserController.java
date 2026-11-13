@@ -8,6 +8,8 @@ import dan.bank.bank.user.dto.UserResponse;
 import dan.bank.bank.user.service.UserService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
+import dan.bank.bank.notification.NotificationService;
+import dan.bank.bank.notification.NotificationType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +34,7 @@ public class UserController {
 
     private final UserService userService;
     private final CurrentUser currentUser;
+    private final NotificationService notifications;
     private final PinService pinService;
 
 
@@ -68,6 +71,7 @@ public class UserController {
     @PostMapping("/me/pin")
     public ResponseEntity<Void> setPin(@Valid @RequestBody SetPinRequest request) {
         pinService.setPin(currentUser.id(), request.pin(), request.password());
+        notifications.notifyIndependently(currentUser.id(), NotificationType.SECURITY, "Transaction PIN updated", "Your transaction PIN was set or changed. If this was not you, change your password right away.");
         return ResponseEntity.noContent().build();
     }
 

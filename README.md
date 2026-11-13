@@ -16,6 +16,7 @@ Built with Spring Boot, PostgreSQL and Flyway.
 - [Card Deposits (Paystack)](#card-deposits-paystack)
 - [Trying It in Swagger](#trying-it-in-swagger)
 - [KYC and Face Verification](#kyc-and-face-verification)
+- [New Devices and Face Sign-in](#new-devices-and-face-sign-in)
 - [How Transfers Work](#how-transfers-work)
 - [Project Structure](#project-structure)
 - [Testing](#testing)
@@ -35,6 +36,8 @@ Built with Spring Boot, PostgreSQL and Flyway.
 - Savings goals (flexible or locked until a date), PIN-protected withdrawals
 - Financial insights from your real transactions (monthly money in and out, where it went)
 - Change password (other devices are signed out)
+- **New-device sign-in with a face check**, a trusted-devices list you can remove devices from, and security alerts
+- Automatic sign-out after 10 minutes of inactivity
 - Card deposits through Paystack (signed webhook, verified server-side, credited exactly once)
 - In-app notifications for debits, credits and KYC results
 - Roles (`USER`, `ADMIN`); only admins can credit or debit accounts directly
@@ -120,6 +123,10 @@ All settings come from environment variables (see `src/main/resources/applicatio
 | `PAYSTACK_SECRET_KEY` | No | Paystack secret key. **Card deposits are off until this is set.** Use a test key (`sk_test_...`) until you go live, and never commit it. |
 | `PAYSTACK_CALLBACK_URL` | No | Where Paystack sends the customer after paying: your frontend's address (default `http://localhost:5173`) |
 | `PAYSTACK_BASE_URL` | No | Defaults to `https://api.paystack.co`. Only change it to point at the local stand-in |
+| `KYC_FACE_PROVIDER` | No | `smileid` (Smile ID SmartSelfie) or `stub` (development only). Unset switches face checks off |
+| `SMILE_PARTNER_ID`, `SMILE_API_KEY` | With `smileid` | Your Smile ID credentials. The app refuses to start with `smileid` selected and these missing |
+| `SMILE_SERVER` | No | `0` = Smile ID sandbox (default), `1` = production |
+| `SMILE_APPROVED_RESULT_CODES` | With `smileid` | Comma-separated Smile ID result codes that mean a face check **passed**. Empty by default, so nothing passes until you set it (see below) |
 | `kyc.face.provider` | No | Face-verification provider. Unset by default (the KYC endpoint returns 503). `stub` is for local development only. |
 
 Limits and fee tiers live in `application.properties` (`bank.limits.*`, `bank.fees.*`). Unverified users use the stricter `bank.limits.tier0-*` values. The default values are placeholders. Set real ones before going live.
@@ -139,6 +146,7 @@ In development Vite forwards `/api` to the backend at `http://localhost:8080` (s
 Notes:
 - Tokens are kept in memory only. Refreshing the page signs you out, and an expired access token is refreshed automatically.
 - **Working with real data:** sign-up, sign-in, dashboard, add money by card (Paystack), send money (PIN, fee, limits, receipt), beneficiaries, notifications, history, statements (preview and CSV), accounts (open and close), PIN setup and password change, limits, identity verification, **savings goals** and **financial insights**.
+- **Sign-out when idle:** the app signs you out after 10 minutes without activity (`VITE_IDLE_MINUTES` changes it).
 - **Not built yet** (shown as "coming soon" for real accounts): cards (needs a card issuer), bill payments and airtime (needs a provider such as VTpass), scheduled and recurring payments, automatic savings, and support chat. **Forgotten-password reset** needs an email or SMS provider, so that page says it isn't available yet instead of pretending.
 - For local testing of the identity check, start the backend with `KYC_FACE_PROVIDER=stub`. The stub approves any photo and must never be used in production.
 - New accounts start with zero balance. To fund one while testing, make a user an admin (`ADMIN_EMAIL`) and call `POST /accounts/{id}/credit`.
@@ -237,6 +245,14 @@ Saved money leaves the account's balance (a `SAVINGS_OUT` ledger entry) and retu
 | GET | `/deposits/{reference}` | Status (`PENDING`, `SUCCESS`, `FAILED`). If still pending it asks Paystack, so it also works when webhooks cannot reach you |
 | POST | `/webhooks/paystack` | Called by Paystack, not by your app. Public, protected by the `x-paystack-signature` header |
 
+### Devices and new-device sign-in
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/auth/device/verify` | Finish a new-device sign-in: multipart `challengeToken`, `selfie`, and several `liveness` frames. Returns the tokens and a `deviceToken` to keep |
+| GET | `/devices` | Your trusted devices (send `X-Device-Token` to see which one you are on) |
+| DELETE | `/devices/{id}` | Remove a device and sign it out |
+
 ### KYC
 
 | Method | Path | Description |
@@ -319,6 +335,24 @@ PAYSTACK_SECRET_KEY=sk_test_fake_dev_secret PAYSTACK_BASE_URL=http://localhost:9
 
 It is for development only and proves nothing about the real Paystack. Never point production at it.
 
+## New Devices and Face Sign-in
+
+**What it does.** The first device you sign in on is trusted automatically. When someone signs in from a *different* device with the right password, `POST /auth/login` answers `202` with `DEVICE_VERIFICATION_REQUIRED` and **no tokens**. The new device must then pass a face check (`POST /auth/device/verify`) before it gets a session. You get a security alert at each step, can see every device under Settings, and can remove one (it is signed out immediately). The browser keeps a secret `deviceToken`; only its hash is stored on the server. A challenge works once, lasts 10 minutes and allows 5 tries.
+
+**Face checks need a provider.** Comparing faces and telling a live person from a photo is done by Smile ID, not by this code. The app captures a selfie plus 7 quick frames from the live camera (a single photo cannot prove a live person) and sends them to the provider.
+
+- **Without a provider** (`KYC_FACE_PROVIDER` unset) a new device is allowed in but the owner is **alerted**. That is weaker protection and is the default for local development.
+- **With `KYC_FACE_PROVIDER=stub`** the check runs but approves any image. It is only for trying the flow on your machine.
+- **With `KYC_FACE_PROVIDER=smileid`** the check is real. Set `SMILE_PARTNER_ID`, `SMILE_API_KEY` and `SMILE_SERVER` (`0` sandbox, `1` production).
+
+**Before you rely on Smile ID, do these in the sandbox.** The adapter was built from Smile ID's official Java library, but it has **not been run against Smile ID** (no credentials were available), so test it:
+1. Set `KYC_FACE_PROVIDER=smileid` and your sandbox credentials, and sign in on a second browser as a test user with an enrolled face (complete *Verify identity* first: that enrols the face).
+2. Every check logs a line like `Smile ID job ... resultCode=XXXX resultText=...`. Read the code Smile ID returns for a pass in the sandbox.
+3. Put that code in `SMILE_APPROVED_RESULT_CODES` and restart. It is **empty by default on purpose**: with it empty, nothing can pass, so a wrong guess can never approve a stranger.
+4. Check a deliberate failure (a different face, or a photo of a screen) is refused, and check Smile ID's current docs for the liveness requirements.
+
+The adapter fails closed: a timeout, an unfinished job, an unknown code or a missing key all mean "not verified" (and an outage returns 503 without using up the person's tries).
+
 ## Trying It in Swagger
 
 1. Start the app and open `http://localhost:8080/swagger-ui/index.html`.
@@ -338,7 +372,7 @@ Users start at **tier 0** (unverified) with stricter transfer limits. A successf
 - Face checks go through the `FaceVerificationProvider` interface (`src/main/java/dan/bank/bank/Kyc`). A real vendor adapter (for example Smile ID, Youverify, Dojah or AWS Rekognition) implements it, so the app doesn't depend on one vendor.
 - **Only the verdict is stored** (status, provider name and reference). Selfie images are never saved or logged.
 - Uploads are accepted only if the file really is a JPEG or PNG (checked by its first bytes, not the client-supplied type).
-- **No real provider is bundled.** With `kyc.face.provider` unset, `POST /kyc/face` returns 503. `kyc.face.provider=stub` approves any image **without checking a face** and must never be enabled in production.
+- **Provider:** `smileid` uses Smile ID's official Java library (SmartSelfie registration and authentication). It is **not tested against the real Smile ID** because that needs your credentials; see "New Devices and Face Sign-in" below. With `kyc.face.provider` unset, `POST /kyc/face` returns 503; `stub` approves any image without checking a face and must never be used in production.
 - Real liveness detection (to resist photo spoofing) has to come from the vendor's SDK in the client app.
 
 ## How Transfers Work
