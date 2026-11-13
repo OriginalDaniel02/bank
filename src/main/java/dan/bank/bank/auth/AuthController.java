@@ -1,6 +1,9 @@
 package dan.bank.bank.auth;
 
 import dan.bank.bank.auth.dto.AuthResponse;
+import dan.bank.bank.auth.dto.SignUpRequest;
+import dan.bank.bank.auth.dto.UserSummary;
+import org.springframework.http.HttpStatus;
 import dan.bank.bank.auth.dto.RefreshTokenRequest;
 import dan.bank.bank.user.dto.LoginRequest;
 import jakarta.validation.Valid;
@@ -18,6 +21,11 @@ public class AuthController {
 
     public AuthController(AuthService authService) {
         this.authService = authService;
+    }
+
+    @PostMapping("/signup")
+    public ResponseEntity<UserSummary> signUp(@Valid @RequestBody SignUpRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(authService.signUp(request));
     }
 
     @PostMapping("/login")

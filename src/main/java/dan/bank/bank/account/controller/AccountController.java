@@ -1,6 +1,7 @@
 package dan.bank.bank.account.controller;
 
 import dan.bank.bank.account.dto.AccountDto;
+import dan.bank.bank.account.model.AccountType;
 import dan.bank.bank.account.dto.AccountResponse;
 import dan.bank.bank.account.dto.AccountUpdate;
 import dan.bank.bank.account.dto.MoneyRequest;
@@ -60,10 +61,12 @@ public class AccountController {
     }
 
     @PostMapping("/user/{userId}")
-    public ResponseEntity<AccountResponse<AccountDto>> createAccount(@PathVariable long userId) {
+    public ResponseEntity<AccountResponse<AccountDto>> createAccount(
+            @PathVariable long userId,
+            @RequestParam(defaultValue = "SAVINGS") AccountType type) {
         currentUser.requireSelf(userId);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(accountService.createAccount(userId));
+                .body(accountService.createAccount(userId, type));
     }
 
     @PreAuthorize("hasRole('ADMIN')")

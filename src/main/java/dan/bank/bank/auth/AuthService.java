@@ -1,6 +1,12 @@
 package dan.bank.bank.auth;
 
 import dan.bank.bank.auth.dto.AuthResponse;
+import dan.bank.bank.account.service.AccountService;
+import dan.bank.bank.auth.dto.SignUpRequest;
+import dan.bank.bank.auth.dto.UserSummary;
+import dan.bank.bank.user.dto.UserDto;
+import dan.bank.bank.user.dto.UserRequest;
+import dan.bank.bank.user.service.UserService;
 import dan.bank.bank.auth.model.RefreshToken;
 import dan.bank.bank.auth.repository.RefreshTokenRepository;
 import dan.bank.bank.user.dto.LoginRequest;
@@ -28,25 +34,44 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final TokenService tokenService;
     private final long refreshTokenDays;
+    private final UserService userService;
+    private final AccountService accountService;
 
     public AuthService(
             UserRepository userRepository, RefreshTokenRepository refreshTokenRepository,
                        PasswordEncoder passwordEncoder, TokenService tokenService,
-                       @Value("${jwt.refresh-token-days}") long refreshTokenDays) {
+                       @Value("${jwt.refresh-token-days}") long refreshTokenDays,
+                       UserService userService, AccountService accountService) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.tokenService = tokenService;
         this.refreshTokenDays = refreshTokenDays;
+        this.userService = userService;
+        this.accountService = accountService;
     }
 
     @Transactional
     public AuthResponse login(LoginRequest request) {
-        User user = userRepository.findByEmail(request.email()).orElseThrow(this::invalidCredentials);
+        String identifier = request.identifier().strip();
+        User user = (identifier.contains("@")
+                ? userRepository.findByEmail(identifier)
+                : userRepository.findByPhoneNumber(identifier.replaceAll("\\s", "")))
+                .orElseThrow(this::invalidCredentials);
         if (!passwordEncoder.matches(request.password(), user.getPassword())) {
             throw invalidCredentials();
         }
         return createTokenPair(user);
+    }
+
+    /** Creates the user and their first (savings) account together, so a new user can bank immediately. */
+    @Transactional
+    public UserSummary signUp(SignUpRequest request) {
+        UserDto created = userService.signUp(new UserRequest(
+                request.firstName().strip(), request.lastName().strip(), request.phoneNumber().replaceAll("\\s", ""),
+                null, request.email().strip(), request.password(), null)).data();
+        accountService.createAccount(created.id());
+        return UserSummary.from(userRepository.getReferenceById(created.id()));
     }
 
     @Transactional
@@ -74,7 +99,8 @@ public class AuthService {
         Instant refreshExpiration = Instant.now().plus(refreshTokenDays, ChronoUnit.DAYS);
         refreshTokenRepository.save(new RefreshToken(hashToken(refreshToken), user, refreshExpiration));
 
-        return new AuthResponse(accessToken, refreshToken, "Bearer", tokenService.accessTokenExpiration());
+        return new AuthResponse(accessToken, refreshToken, "Bearer", tokenService.accessTokenExpiration(),
+                tokenService.accessTokenSeconds(), UserSummary.from(user));
     }
 
     private String hashToken(String token) {

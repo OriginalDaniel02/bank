@@ -64,6 +64,11 @@ public class AccountService {
 
     @Transactional
     public AccountResponse<AccountDto> createAccount(long userId) {
+        return createAccount(userId, AccountType.SAVINGS);
+    }
+
+    @Transactional
+    public AccountResponse<AccountDto> createAccount(long userId, AccountType type) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> notFound("User not found"));
 
@@ -72,7 +77,7 @@ public class AccountService {
         account.setAccountName((user.getFirstName() + " " + user.getLastName()).strip());
         account.setAccountNumber(generateAccountNumber());
         account.setBalance(BigDecimal.ZERO.setScale(2,RoundingMode.UNNECESSARY));
-        account.setType(AccountType.SAVINGS);
+        account.setType(type);
         account.setStatus(AccountStatus.ACTIVE);
 
         Account savedAccount = accountRepository.save(account);
