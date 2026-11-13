@@ -28,7 +28,10 @@ public class SecurityConfig {
                                 "/api/v1/users/signUp",
                                 "/api/v1/auth/**",
                                 "/v3/api-docs/**",
-                                "/swagger-ui/**"
+                                "/swagger-ui/**",
+                                // Errors (404, 403, 409...) are forwarded to /error. If it needs a login,
+                                // every real error is reported as 401 instead of its true status.
+                                "/error"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
